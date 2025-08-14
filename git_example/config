@@ -1,0 +1,19 @@
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+	symlinks = false
+	ignorecase = true
+[atomGithub]
+	historySha = 4cab09a5abe30c5b53fc5a33a72709f5805914c4
+[remote "origin"]
+	url = https://github.com/MikeBlyth/nls_bard.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "master"]
+	remote = origin
+	merge = refs/heads/master
+[branch "dev"]
+	vscode-merge-base = origin/master
+	remote = origin
+	merge = refs/heads/dev

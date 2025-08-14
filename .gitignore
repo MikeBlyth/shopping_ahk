@@ -1,0 +1,28 @@
+# Sensitive files
+.env
+google_credentials.json
+
+# AutoHotkey communication files
+ahk_status.txt
+ahk_command.txt
+ahk_response.txt
+
+# Test files
+test_*.ahk
+minimal_test.ahk
+debug_*.ahk
+show_all_windows.ahk
+just_switch_browser.ahk
+
+# Backup and temporary files
+*.bak
+*.tmp
+*~
+
+# Ruby
+.bundle/
+vendor/
+
+# Windows
+Thumbs.db
+Desktop.ini
