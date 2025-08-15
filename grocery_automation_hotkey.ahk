@@ -177,31 +177,92 @@ ShowItemPrompt(param) {
         if description != "" {
             message .= "Description: " . description . "`n"
         }
-        if url != "" {
-            message .= "URL: " . url . "`n"
-        }
-        message .= "`nReady to add to cart."
+        message .= "`nPage should be loaded. Add to cart if desired."
     } else {
         message := "🔍 New item: " . item_name . "`n"
-        message .= "Search results should be displayed. Find the correct product and add to cart."
+        message .= "Search results displayed. Find the correct product, navigate to it, and add to cart if desired."
     }
     
-    message .= "`n`nAfter adding to cart, choose:"
-    message .= "`n[Yes] - Continue to next item"
-    message .= "`n[No] - Save this product URL"
-    message .= "`n[Cancel] - Record price"
+    message .= "`n`nAfter reviewing/adding to cart:"
     
-    result := MsgBox(message, "Item: " . item_name, "YesNoCancel")
+    ; Show informational message first
+    MsgBox(message, "Item: " . item_name, "OK")
     
-    switch result {
-        case "Yes":
+    ; Now ask for price
+    price_result := InputBox("💰 Enter the price if you added this item to cart`n(Leave blank or enter 0 to skip):", "Price for " . item_name, "w300 h150")
+    
+    if price_result.Result = "OK" {
+        price_text := price_result.Text
+        
+        ; Check if price is blank or zero
+        if price_text = "" || price_text = "0" || price_text = "0.00" {
+            ; No purchase, but for new items, still capture URL
+            if !is_known {
+                ; Get current URL from browser
+                Send("^l")  ; Focus address bar
+                Sleep(100)
+                Send("^c")  ; Copy URL
+                Sleep(100)
+                current_url := A_Clipboard
+                A_Clipboard := ""  ; Clear clipboard
+                
+                WriteResponse("save_url_only|" . current_url)
+            } else {
+                WriteResponse("continue")
+            }
+        } else {
+            ; Valid price entered - now ask for quantity
+            qty_result := InputBox("🛒 How many " . item_name . " did you add to cart?", "Quantity", "w300 h150", "1")
+            
+            if qty_result.Result = "OK" && qty_result.Text != "" {
+                quantity := qty_result.Text
+                
+                ; For new items, also capture the URL
+                if !is_known {
+                    ; Get current URL from browser
+                    Send("^l")  ; Focus address bar
+                    Sleep(100)
+                    Send("^c")  ; Copy URL
+                    Sleep(100)
+                    current_url := A_Clipboard
+                    A_Clipboard := ""  ; Clear clipboard
+                    
+                    WriteResponse("purchase_new|" . price_text . "|" . quantity . "|" . current_url)
+                } else {
+                    WriteResponse("purchase|" . price_text . "|" . quantity)
+                }
+            } else {
+                ; Cancelled quantity - for new items, still save URL without purchase
+                if !is_known {
+                    ; Get current URL from browser
+                    Send("^l")  ; Focus address bar
+                    Sleep(100)
+                    Send("^c")  ; Copy URL
+                    Sleep(100)
+                    current_url := A_Clipboard
+                    A_Clipboard := ""  ; Clear clipboard
+                    
+                    WriteResponse("save_url_only|" . current_url)
+                } else {
+                    WriteResponse("continue")
+                }
+            }
+        }
+    } else {
+        ; Cancelled price dialog - for new items, still save URL
+        if !is_known {
+            ; Get current URL from browser
+            Send("^l")  ; Focus address bar
+            Sleep(100)
+            Send("^c")  ; Copy URL
+            Sleep(100)
+            current_url := A_Clipboard
+            A_Clipboard := ""  ; Clear clipboard
+            
+            WriteResponse("save_url_only|" . current_url)
+        } else {
             WriteResponse("continue")
-        case "No":
-            WriteResponse("save_url")
-        case "Cancel":
-            WriteResponse("record_price")
-        default:
-            WriteResponse("continue")
+        }
     }
     
     WriteStatus("COMPLETED")

@@ -55,6 +55,10 @@ class WalmartDatabase
     @items.where(prod_id: prod_id).update(updates.merge(updated_at: Time.now))
   end
 
+  def update_item_description(prod_id, new_description)
+    @items.where(prod_id: prod_id).update(description: new_description)
+  end
+
   def get_all_items_by_priority
     @items.order(Sequel.desc(:priority), :description).all
   end

@@ -1,0 +1,62 @@
+# Walmart Grocery Automation System - Additional Instructions
+
+## Current System State
+- The Walmart grocery automation system is fully functional and working
+- AutoHotkey script captures URLs for new items regardless of purchase status
+- Ruby backend automatically starts/manages AutoHotkey lifecycle 
+- Purchase tracking is implemented with price/quantity capture
+- Git repository is set up but not yet pushed to GitHub (needs repo creation first)
+
+## Key Technical Details
+- Uses text file communication between Ruby and AutoHotkey (keep it simple!)
+- AutoHotkey handles all user interaction via GUI dialogs
+- Database has 22 items, 0 purchase records (system just started recording)
+- Hotkey workflow: Ctrl+Shift+R to start and continue between items
+- New items get searched, known items navigate directly to saved URLs
+
+## Recent Improvements
+- Fixed browser window detection issues by using manual hotkey triggering
+- Implemented automatic URL capture for new products
+- Added proper purchase recording with price and quantity
+- Created clean lifecycle management with automatic cleanup
+
+## Usage Instructions
+1. Run `ruby grocery_bot.rb` (automatically starts AutoHotkey)
+2. Open browser to walmart.com
+3. Press Ctrl+Shift+R when ready to start
+4. For each item:
+   - Automation navigates/searches
+   - Press Ctrl+Shift+R to continue after manual review
+   - Enter price if purchased (or 0/blank to skip)
+   - Enter quantity if price given
+   - URLs automatically captured for new items
+
+## Browser Compatibility
+- System works with any browser setup (tested with Edge "Baseline" group)
+- Designed for human-paced shopping to avoid bot detection
+- Uses keyboard automation (Ctrl+L, Ctrl+C) for URL capture
+
+## Database Structure
+- PostgreSQL with items and purchases tables
+- Bi-directional sync with Google Sheets inventory
+- Items have prod_id, URL, description, priority, default_quantity
+- Purchases track prod_id, quantity, price_cents, purchase_date
+
+## File Structure
+- `grocery_bot.rb` - Main automation orchestrator
+- `grocery_automation_hotkey.ahk` - Browser automation with GUI controls  
+- `lib/` - Database, Google Sheets, and AutoHotkey bridge modules
+- `.env` - Database credentials and Google Sheets ID
+- `google_credentials.json` - Google API service account key
+
+## Next Steps if Continued
+- Test the new URL capture functionality with actual new items
+- Push git repository to GitHub (need to create `shopping_ahk` repo first)
+- Monitor purchase history accumulation over time
+- Consider any additional automation features
+
+## Important Notes
+- All sensitive files (.env, credentials) are properly gitignored
+- AutoHotkey lifecycle managed automatically (no manual cleanup needed)
+- Text file communication is intentionally simple and reliable
+- System builds database of known products over time regardless of purchases

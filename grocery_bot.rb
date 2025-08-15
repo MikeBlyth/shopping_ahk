@@ -288,13 +288,98 @@ class WalmartGroceryAssistant
       response = @ahk.show_item_prompt(item_name, is_known: false)
     end
     
-    case response
-    when 'save_url'
-      save_new_item(item_name)
-    when 'record_price'
-      record_manual_price(db_item || { description: item_name })
+    if response&.start_with?('purchase_new|')
+      # Parse "purchase_new|price|quantity|url" - new item with URL capture
+      parts = response.split('|')
+      price_str = parts[1]
+      quantity_str = parts[2] 
+      captured_url = parts[3]
+      
+      begin
+        price_float = Float(price_str)
+        quantity_int = Integer(quantity_str)
+        price_cents = (price_float * 100).to_i
+        
+        # Create new database item with captured URL
+        if captured_url && captured_url.include?('walmart.com') && captured_url.include?('/ip/')
+          prod_id = @db.extract_prod_id_from_url(captured_url)
+          
+          if prod_id
+            # Create the new item
+            @db.create_item(
+              prod_id: prod_id,
+              url: captured_url,
+              description: item_name,
+              modifier: nil,
+              default_quantity: 1,
+              priority: 5
+            )
+            
+            # Record the purchase
+            new_item = { prod_id: prod_id, description: item_name }
+            record_purchase(new_item, price_cents: price_cents, quantity: quantity_int)
+            
+            puts "✅ Saved new item: #{item_name} and recorded purchase"
+          else
+            puts "❌ Could not extract product ID from URL: #{captured_url}"
+          end
+        else
+          puts "❌ Invalid Walmart product URL captured: #{captured_url}"
+        end
+      rescue ArgumentError
+        puts "❌ Invalid price or quantity format"
+      end
+      
+    elsif response&.start_with?('purchase|')
+      # Parse "purchase|price|quantity" - known item
+      parts = response.split('|')
+      price_str = parts[1]
+      quantity_str = parts[2]
+      
+      begin
+        price_float = Float(price_str)
+        quantity_int = Integer(quantity_str)
+        price_cents = (price_float * 100).to_i
+        
+        # Record the purchase
+        if db_item && db_item[:prod_id]
+          record_purchase(db_item, price_cents: price_cents, quantity: quantity_int)
+        else
+          puts "⚠️ Cannot record purchase for unknown item: #{item_name}"
+        end
+      rescue ArgumentError
+        puts "❌ Invalid price or quantity format"
+      end
+      
+    elsif response&.start_with?('save_url_only|')
+      # Parse "save_url_only|url" - new item, no purchase, but save URL
+      parts = response.split('|')
+      captured_url = parts[1]
+      
+      if captured_url && captured_url.include?('walmart.com') && captured_url.include?('/ip/')
+        prod_id = @db.extract_prod_id_from_url(captured_url)
+        
+        if prod_id
+          # Create the new item without recording a purchase
+          @db.create_item(
+            prod_id: prod_id,
+            url: captured_url,
+            description: item_name,
+            modifier: nil,
+            default_quantity: 1,
+            priority: 5
+          )
+          
+          puts "✅ Saved new item URL: #{item_name} (no purchase recorded)"
+        else
+          puts "❌ Could not extract product ID from URL: #{captured_url}"
+        end
+      else
+        puts "❌ Invalid Walmart product URL captured: #{captured_url}"
+      end
+      
     else
-      # continue - do nothing
+      # Just continue - no purchase to record
     end
   end
 
