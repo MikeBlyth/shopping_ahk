@@ -79,6 +79,10 @@ ProcessCommand(command) {
             WaitForContinue()
         case "SESSION_COMPLETE":
             ProcessSessionComplete()
+        case "ADD_ITEM_DIALOG":
+            ShowAddItemDialog(param)
+        case "WAIT_FOR_USER":
+            WaitForUser()
         default:
             WriteStatus("ERROR")
             WriteResponse("Unknown command: " . action)
@@ -141,6 +145,22 @@ GetCurrentURL() {
     WriteStatus("COMPLETED")
 }
 
+GetCurrentURLSilent() {
+    ; Get current URL without writing to response file
+    Send("^l")  ; Focus address bar
+    Sleep(100)
+    Send("^c")  ; Copy URL
+    Sleep(100)
+    
+    ; Get URL from clipboard
+    currentURL := A_Clipboard
+    
+    ; Clear clipboard
+    A_Clipboard := ""
+    
+    return currentURL
+}
+
 ActivateBrowserCommand() {
     ; Since user manually switched to browser, just confirm it's active
     WriteStatus("COMPLETED")
@@ -163,108 +183,125 @@ ShowItemPrompt(param) {
     item_description := parts.Length >= 5 ? parts[5] : item_name
     default_quantity := parts.Length >= 6 ? parts[6] : "1"
     
+    ; Show the purchase dialog
+    ShowPurchaseDialog(item_name, is_known, item_description, default_quantity)
+}
+
+ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
+    ; Create dialog
+    purchaseGui := Gui("+AlwaysOnTop", "Item: " . item_name)
+    purchaseGui.SetFont("s10")
+    
+    ; Item info
     if is_known {
-        message := "✅ Found saved item: " . item_name . "`n"
-        if description != "" {
-            message .= "Description: " . description . "`n"
-        }
-        message .= "`nPage should be loaded. Add to cart if desired."
+        purchaseGui.Add("Text", "w400", "✅ Found saved item: " . item_name)
+        purchaseGui.Add("Text", "w400", "Page should be loaded. Add to cart if desired.")
     } else {
-        message := "🔍 New item: " . item_name . "`n"
-        message .= "Search results displayed. Find the correct product, navigate to it, and add to cart if desired."
+        purchaseGui.Add("Text", "w400", "🔍 New item: " . item_name)
+        purchaseGui.Add("Text", "w400", "Search results displayed. Navigate to correct product.")
     }
     
-    message .= "`n`nAfter reviewing/adding to cart:"
+    purchaseGui.Add("Text", "xm y+15 w400", "Item: " . item_description)
     
-    ; Show informational message first
-    MsgBox(message, "Item: " . item_name, "OK")
+    ; Price field
+    purchaseGui.Add("Text", "xm y+15", "Price (leave blank to skip):")
+    priceEdit := purchaseGui.Add("Edit", "w150 r1")
+    purchaseGui.Add("Text", "x+5 yp+3", "$")
     
-    ; Now ask for price with item details
-    price_prompt := "💰 Item: " . item_description . "`n"
-    price_prompt .= "Default Quantity: " . default_quantity . "`n`n"
-    price_prompt .= "Enter the price if you added this item to cart`n(Leave blank or enter 0 to skip):"
+    ; Quantity field
+    purchaseGui.Add("Text", "xm y+10", "Quantity:")
+    quantityEdit := purchaseGui.Add("Edit", "w150 r1", default_quantity)
     
-    price_result := InputBox(price_prompt, "Price for " . item_name, "w400 h200")
+    ; Buttons
+    addButton := purchaseGui.Add("Button", "xm y+20 w100 h30", "Record Purchase")
+    skipButton := purchaseGui.Add("Button", "x+10 w100 h30", "Skip Item")
+    cancelButton := purchaseGui.Add("Button", "x+10 w100 h30", "Cancel")
     
-    if price_result.Result = "OK" {
-        price_text := price_result.Value
-        
-        ; Check if price is blank or zero
-        if price_text = "" || price_text = "0" || price_text = "0.00" {
-            ; No purchase, but for new items, still capture URL
-            if !is_known {
-                ; Get current URL from browser
-                Send("^l")  ; Focus address bar
-                Sleep(100)
-                Send("^c")  ; Copy URL
-                Sleep(100)
-                current_url := A_Clipboard
-                A_Clipboard := ""  ; Clear clipboard
-                
-                WriteResponse("save_url_only|" . current_url)
-            } else {
-                WriteResponse("continue")
-            }
-        } else {
-            ; Valid price entered - now ask for quantity
-            qty_prompt := "🛒 Item: " . item_description . "`n"
-            qty_prompt .= "Price: $" . price_text . "`n`n"
-            qty_prompt .= "How many did you add to cart?"
-            
-            qty_result := InputBox(qty_prompt, "Quantity for " . item_name, "w350 h180", default_quantity)
-            
-            if qty_result.Result = "OK" && qty_result.Value != "" {
-                quantity := qty_result.Value
-                
-                ; For new items, also capture the URL
-                if !is_known {
-                    ; Get current URL from browser
-                    Send("^l")  ; Focus address bar
-                    Sleep(100)
-                    Send("^c")  ; Copy URL
-                    Sleep(100)
-                    current_url := A_Clipboard
-                    A_Clipboard := ""  ; Clear clipboard
-                    
-                    WriteResponse("purchase_new|" . price_text . "|" . quantity . "|" . current_url)
-                } else {
-                    WriteResponse("purchase|" . price_text . "|" . quantity)
-                }
-            } else {
-                ; Cancelled quantity - for new items, still save URL without purchase
-                if !is_known {
-                    ; Get current URL from browser
-                    Send("^l")  ; Focus address bar
-                    Sleep(100)
-                    Send("^c")  ; Copy URL
-                    Sleep(100)
-                    current_url := A_Clipboard
-                    A_Clipboard := ""  ; Clear clipboard
-                    
-                    WriteResponse("save_url_only|" . current_url)
-                } else {
-                    WriteResponse("continue")
-                }
-            }
-        }
-    } else {
-        ; Cancelled price dialog - for new items, still save URL
-        if !is_known {
-            ; Get current URL from browser
-            Send("^l")  ; Focus address bar
-            Sleep(100)
-            Send("^c")  ; Copy URL
-            Sleep(100)
-            current_url := A_Clipboard
-            A_Clipboard := ""  ; Clear clipboard
-            
-            WriteResponse("save_url_only|" . current_url)
+    ; Store references for event handlers
+    purchaseGui.priceEdit := priceEdit
+    purchaseGui.quantityEdit := quantityEdit
+    purchaseGui.is_known := is_known
+    
+    ; Button event handlers
+    addButton.OnEvent("Click", (*) => PurchaseClickHandler(purchaseGui))
+    skipButton.OnEvent("Click", (*) => SkipClickHandler(purchaseGui))
+    cancelButton.OnEvent("Click", (*) => CancelPurchaseClickHandler(purchaseGui))
+    
+    ; Show dialog
+    purchaseGui.Show()
+    WriteStatus("WAITING_FOR_INPUT")
+}
+
+; Event handler functions for Purchase dialog
+PurchaseClickHandler(gui) {
+    price := Trim(gui.priceEdit.Text)
+    quantity := Trim(gui.quantityEdit.Text)
+    
+    ; Validate quantity
+    if quantity = "" || !IsNumber(quantity) || Integer(quantity) < 1 {
+        quantity := "1"
+    }
+    
+    ; Check if price is valid
+    if price = "" || price = "0" || price = "0.00" {
+        ; No purchase, but for new items, still capture URL
+        if !gui.is_known {
+            GetCurrentURLAndRespond("save_url_only")
         } else {
             WriteResponse("continue")
+        }
+    } else {
+        ; Valid price entered - record purchase
+        if !IsNumber(price) {
+            MsgBox("Please enter a valid price (numbers only)", "Invalid Price")
+            return
+        }
+        
+        ; For new items, also capture the URL
+        if !gui.is_known {
+            GetCurrentURLAndRespond("purchase_new|" . price . "|" . quantity)
+        } else {
+            WriteResponse("purchase|" . price . "|" . quantity)
         }
     }
     
     WriteStatus("COMPLETED")
+    gui.Destroy()
+}
+
+SkipClickHandler(gui) {
+    ; Skip purchase, but for new items, still capture URL
+    if !gui.is_known {
+        GetCurrentURLAndRespond("save_url_only")
+    } else {
+        WriteResponse("continue")
+    }
+    
+    WriteStatus("COMPLETED")
+    gui.Destroy()
+}
+
+CancelPurchaseClickHandler(gui) {
+    ; Cancel completely - for new items, still save URL
+    if !gui.is_known {
+        GetCurrentURLAndRespond("save_url_only")
+    } else {
+        WriteResponse("continue")
+    }
+    
+    WriteStatus("COMPLETED")
+    gui.Destroy()
+}
+
+GetCurrentURLAndRespond(responsePrefix) {
+    ; Get current URL from browser (silent)
+    current_url := GetCurrentURLSilent()
+    
+    if responsePrefix = "save_url_only" {
+        WriteResponse("save_url_only|" . current_url)
+    } else {
+        WriteResponse(responsePrefix . "|" . current_url)
+    }
 }
 
 ShowMultipleChoice(param) {
@@ -382,25 +419,209 @@ WaitForContinue() {
     WriteStatus("COMPLETED")
 }
 
-; Add command to reset session
+WaitForUser() {
+    global WaitingForUser
+    WaitingForUser := true
+    WriteStatus("WAITING_FOR_USER")
+    ToolTip("Press Ctrl+Shift+A to add item or Ctrl+Shift+R to continue...", 10, 10)
+    
+    ; Wait for user signal
+    while WaitingForUser {
+        Sleep(100)
+    }
+    
+    ToolTip()  ; Clear tooltip
+    WriteStatus("COMPLETED")
+}
+
+; Reset session to ready state
 ProcessSessionComplete() {
     WriteResponse("session_reset")
-    WriteStatus("SHUTDOWN")
-    ToolTip("AutoHotkey session complete. Shutting down...", 10, 10)
-    SetTimer(() => ToolTip(), -2000)  ; Clear after 2 seconds
-    Sleep(500)  ; Brief pause to show message
-    ExitApp()
+    WriteStatus("WAITING_FOR_HOTKEY")
+    ToolTip("Shopping complete! Options:\n• Ctrl+Shift+A: Add more items\n• Ctrl+Shift+Q: Exit", 10, 10)
+    ; Don't clear tooltip - let it stay until user acts
+    ResetForNextSession()
 }
+
 
 ; Hotkeys
 ^+q::{
     ; Clean exit - set status to indicate shutdown
+    ToolTip()  ; Clear tooltip
     WriteStatus("SHUTDOWN")
     MsgBox("AutoHotkey script shutting down...", "Walmart Assistant", "OK")
     ExitApp()
 }
 
+^+a::{
+    ; Add new item hotkey
+    ShowAddItemDialogHotkey()
+}
+
 ^+s::{  ; Ctrl+Shift+S to show status
     status := FileExist(StatusFile) ? FileRead(StatusFile) : "No status file"
     MsgBox("Current Status: " . status . "`n`nPress Ctrl+Shift+R when on Walmart page to start")
+}
+
+; Add Item Dialog Functions
+ShowAddItemDialog(suggestedName) {
+    ; Get current URL
+    currentUrl := GetCurrentURL()
+    
+    ; Show the add item dialog
+    ShowAddItemDialogWithDefaults(suggestedName, currentUrl)
+}
+
+ShowAddItemDialogHotkey() {
+    ; Clear tooltip when user takes action
+    ToolTip()
+    
+    ; Get current URL (silent - doesn't write to response file)
+    currentUrl := GetCurrentURLSilent()
+    
+    ; Show dialog with empty suggested name (user triggered)
+    ShowAddItemDialogWithDefaults("", currentUrl)
+}
+
+ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
+    ; Create dialog
+    addItemGui := Gui("+AlwaysOnTop", "Add New Item & Purchase")
+    addItemGui.SetFont("s10")
+    
+    ; Description field
+    addItemGui.Add("Text", , "Item Description:")
+    descriptionEdit := addItemGui.Add("Edit", "w400 r1", suggestedName)
+    
+    ; Modifier field  
+    addItemGui.Add("Text", "xm y+10", "Modifier (optional):")
+    modifierEdit := addItemGui.Add("Edit", "w400 r1", "")
+    
+    ; Priority field
+    addItemGui.Add("Text", "xm y+10", "Priority (1=highest):")
+    priorityEdit := addItemGui.Add("Edit", "w100 r1", "1")
+    
+    ; Default quantity field
+    addItemGui.Add("Text", "xm y+10", "Default Quantity:")
+    defaultQuantityEdit := addItemGui.Add("Edit", "w100 r1", "1")
+    
+    ; Separator
+    addItemGui.Add("Text", "xm y+15 w400", "────────────── Purchase Info ──────────────")
+    
+    ; Price field for this purchase
+    addItemGui.Add("Text", "xm y+10", "Purchase Price (leave blank to skip purchase):")
+    priceEdit := addItemGui.Add("Edit", "w150 r1")
+    addItemGui.Add("Text", "x+5 yp+3", "$")
+    
+    ; Purchase quantity field
+    addItemGui.Add("Text", "xm y+10", "Purchase Quantity:")
+    purchaseQuantityEdit := addItemGui.Add("Edit", "w100 r1", "1")
+    
+    ; URL display (read-only)
+    addItemGui.Add("Text", "xm y+15", "URL (auto-captured):")
+    urlEdit := addItemGui.Add("Edit", "w400 r2 ReadOnly", currentUrl)
+    
+    ; Buttons
+    addButton := addItemGui.Add("Button", "xm y+15 w120 h30", "Add & Purchase")
+    addOnlyButton := addItemGui.Add("Button", "x+10 w100 h30", "Add Only")
+    cancelButton := addItemGui.Add("Button", "x+10 w100 h30", "Cancel")
+    
+    ; Make variables accessible to event handlers
+    addItemGui.descriptionEdit := descriptionEdit
+    addItemGui.modifierEdit := modifierEdit
+    addItemGui.priorityEdit := priorityEdit
+    addItemGui.defaultQuantityEdit := defaultQuantityEdit
+    addItemGui.priceEdit := priceEdit
+    addItemGui.purchaseQuantityEdit := purchaseQuantityEdit
+    addItemGui.currentUrl := currentUrl
+    
+    ; Button event handlers
+    addButton.OnEvent("Click", (*) => AddAndPurchaseClickHandler(addItemGui))
+    addOnlyButton.OnEvent("Click", (*) => AddOnlyClickHandler(addItemGui))
+    cancelButton.OnEvent("Click", (*) => CancelItemClickHandler(addItemGui))
+    
+    ; Show dialog
+    addItemGui.Show()
+    WriteStatus("WAITING_FOR_INPUT")
+}
+
+; Event handler functions for Add Item dialog
+AddAndPurchaseClickHandler(gui) {
+    global WaitingForUser
+    description := Trim(gui.descriptionEdit.Text)
+    modifier := Trim(gui.modifierEdit.Text)
+    priority := Trim(gui.priorityEdit.Text)
+    defaultQuantity := Trim(gui.defaultQuantityEdit.Text)
+    price := Trim(gui.priceEdit.Text)
+    purchaseQuantity := Trim(gui.purchaseQuantityEdit.Text)
+    
+    if description = "" {
+        MsgBox("Description is required!", "Error")
+        return
+    }
+    
+    ; Validate priority
+    if priority = "" || !IsNumber(priority) || Integer(priority) < 1 {
+        priority := "1"
+    }
+    
+    ; Validate default quantity
+    if defaultQuantity = "" || !IsNumber(defaultQuantity) || Integer(defaultQuantity) < 1 {
+        defaultQuantity := "1"
+    }
+    
+    ; Validate purchase quantity
+    if purchaseQuantity = "" || !IsNumber(purchaseQuantity) || Integer(purchaseQuantity) < 1 {
+        purchaseQuantity := "1"
+    }
+    
+    ; Validate price if provided
+    if price != "" && !IsNumber(price) {
+        MsgBox("Please enter a valid price (numbers only)", "Invalid Price")
+        return
+    }
+    
+    ; Format response with purchase info
+    response := "add_and_purchase|" . description . "|" . modifier . "|" . priority . "|" . defaultQuantity . "|" . gui.currentUrl . "|" . price . "|" . purchaseQuantity
+    WriteResponse(response)
+    WriteStatus("COMPLETED")
+    WaitingForUser := false  ; End the wait state
+    gui.Destroy()
+}
+
+AddOnlyClickHandler(gui) {
+    global WaitingForUser
+    description := Trim(gui.descriptionEdit.Text)
+    modifier := Trim(gui.modifierEdit.Text)
+    priority := Trim(gui.priorityEdit.Text)
+    defaultQuantity := Trim(gui.defaultQuantityEdit.Text)
+    
+    if description = "" {
+        MsgBox("Description is required!", "Error")
+        return
+    }
+    
+    ; Validate priority
+    if priority = "" || !IsNumber(priority) || Integer(priority) < 1 {
+        priority := "1"
+    }
+    
+    ; Validate default quantity
+    if defaultQuantity = "" || !IsNumber(defaultQuantity) || Integer(defaultQuantity) < 1 {
+        defaultQuantity := "1"
+    }
+    
+    ; Format response without purchase info (original format)
+    response := description . "|" . modifier . "|" . priority . "|" . defaultQuantity . "|" . gui.currentUrl
+    WriteResponse(response)
+    WriteStatus("COMPLETED")
+    WaitingForUser := false  ; End the wait state
+    gui.Destroy()
+}
+
+CancelItemClickHandler(gui) {
+    global WaitingForUser
+    WriteResponse("cancelled")
+    WriteStatus("COMPLETED")
+    WaitingForUser := false  ; End the wait state
+    gui.Destroy()
 }

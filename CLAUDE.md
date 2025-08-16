@@ -11,25 +11,33 @@
 - Uses text file communication between Ruby and AutoHotkey (keep it simple!)
 - AutoHotkey handles all user interaction via GUI dialogs
 - Database has 22 items, 0 purchase records (system just started recording)
-- Hotkey workflow: Ctrl+Shift+R to start and continue between items
-- New items get searched, known items navigate directly to saved URLs
+- **Hotkey workflow**: 
+  - Ctrl+Shift+R: Start automation and continue between items
+  - Ctrl+Shift+A: Add new item dialog (during manual navigation)
+- **Item processing**: Known items navigate directly, new items search then wait for manual navigation
+- **Single purchase dialog**: Combined price and quantity input with default quantity pre-filled
 
 ## Recent Improvements
 - Fixed browser window detection issues by using manual hotkey triggering
 - Implemented automatic URL capture for new products
 - Added proper purchase recording with price and quantity
 - Created clean lifecycle management with automatic cleanup
+- Simplified user interaction with single combined price/quantity dialog
+- Fixed duplicate numbering in multiple choice selection lists
+- Streamlined item processing flow with proper wait states
 
 ## Usage Instructions
 1. Run `ruby grocery_bot.rb` (automatically starts AutoHotkey)
 2. Open browser to walmart.com
 3. Press Ctrl+Shift+R when ready to start
-4. For each item:
-   - Automation navigates/searches
-   - Press Ctrl+Shift+R to continue after manual review
-   - Enter price if purchased (or 0/blank to skip)
-   - Enter quantity if price given
-   - URLs automatically captured for new items
+4. For each item, automation will:
+   - **Known items**: Navigate directly → Show purchase dialog (price & quantity)
+   - **Multiple matches**: Show selection dialog → Navigate to choice → Show purchase dialog
+   - **New items**: Search → Wait for manual navigation → Use Ctrl+Shift+A to add or Ctrl+Shift+R to skip
+5. Purchase dialog has three options:
+   - Enter price & quantity → Records purchase
+   - Leave price blank → Skips purchase (saves URL for new items)
+   - Cancel → Same as skip
 
 ## Browser Compatibility
 - System works with any browser setup (tested with Edge "Baseline" group)
@@ -44,21 +52,33 @@
 
 ## File Structure
 - `grocery_bot.rb` - Main automation orchestrator
-- `grocery_automation_hotkey.ahk` - Browser automation with GUI controls  
+- `grocery_automation.ahk` - Browser automation with GUI controls  
 - `lib/` - Database, Google Sheets, and AutoHotkey bridge modules
+  - `ahk_bridge.rb` - Ruby-AHK communication layer
+  - `database.rb` - PostgreSQL database interface
+  - `google_sheets_integration.rb` - Bi-directional Google Sheets sync
 - `.env` - Database credentials and Google Sheets ID
 - `google_credentials.json` - Google API service account key
 
-## Race Condition Fix (August 2025)
-- **Issue Identified**: File-based IPC had race condition where Ruby read stale "COMPLETED" status from previous commands
+## Recent Technical Fixes (August 2025)
+
+### Race Condition Fix
+- **Issue**: File-based IPC had race condition where Ruby read stale "COMPLETED" status from previous commands
 - **Root Cause**: Status and response files weren't deleted after reading, causing timing conflicts
-- **Debug Evidence**: With breakpoints all commands received; without breakpoints SHOW_ITEM_PROMPT commands dropped
-- **Solution Applied**: Immediate file deletion after reading in `check_status()` and `read_response()` with 0.1s delays
-- **Status**: ✅ FIXED - All commands (SHOW_PROGRESS, OPEN_URL, SHOW_ITEM_PROMPT) now working correctly
-- **Files Renamed**: `grocery_automation_hotkey.ahk` → `grocery_automation.ahk` with window targeting improvements
+- **Solution**: Immediate file deletion after reading in `check_status()` and `read_response()` with 0.1s delays
+- **Status**: ✅ FIXED - All commands now working correctly
+
+### UI/UX Improvements  
+- **Duplicate Numbers**: Fixed duplicate numbering in multiple choice dialogs (Ruby was adding numbers, AHK was adding them again)
+- **Dialog Simplification**: Combined separate price and quantity dialogs into single purchase dialog
+- **Flow Optimization**: Eliminated surprise dialogs appearing after search; proper wait states only when manual navigation needed
+- **Response Handling**: Fixed add item dialog responses not being processed; wait states now properly end after dialogs
+
+### File Structure Updates
+- **Files Renamed**: `grocery_automation_hotkey.ahk` → `grocery_automation.ahk` 
+- **Function Separation**: Added `GetCurrentURLSilent()` to prevent URL capture from interfering with dialog responses
 
 ## Next Steps if Continued
-- Test with main grocery_automation.ahk script (currently tested with simple_test.ahk)
 - Push git repository to GitHub (need to create `shopping_ahk` repo first)
 - Monitor purchase history accumulation over time
 - Consider any additional automation features

@@ -45,16 +45,18 @@ class WalmartGroceryAssistant
     puts '💾 Syncing database items to Google Sheets...'
     sync_database_to_sheets
 
-    # Clean exit - no need to reset AutoHotkey if no shopping occurred
+    # Shopping list processing complete - now wait for user to decide when to end
     if grocery_items.empty?
-      puts '✅ Sync completed. No shopping session to reset.'
-      @ahk.cleanup if @ahk
+      puts '✅ Sync completed.'
+      @ahk.show_message("No items to order.\n\nPress Ctrl+Shift+Q when you're ready to exit.")
     else
-      # Reset AutoHotkey for next session only if we actually shopped
-      puts '🔄 Resetting for next session...'
-      @ahk.session_complete
-      puts '✅ Ready for next shopping session!'
+      puts '✅ Shopping list processing complete!'
+      @ahk.show_message("Shopping list complete!\n\nYou can:\n• Press Ctrl+Shift+A to add more items\n• Press Ctrl+Shift+Q to exit")
     end
+    
+    # Wait for AHK to signal that user wants to end
+    puts '⏳ Waiting for user to exit (Ctrl+Shift+Q)...'
+    wait_for_ahk_shutdown
   rescue StandardError => e
     puts "\n❌ An error occurred: #{e.message}"
     puts "📍 Location: #{e.backtrace.first}"
@@ -92,12 +94,10 @@ class WalmartGroceryAssistant
     begin
       puts "\n🧹 Cleaning up..."
 
-      # Reset AutoHotkey to ready state for next session
+      # Clean up communication files (AHK controls its own termination)
       if @ahk
-        status = @ahk.check_status
-        unless %w[WAITING_FOR_HOTKEY UNKNOWN].include?(status)
-          puts '🔄 Resetting AutoHotkey for next session...'
-          @ahk.session_complete
+        [@ahk.class::COMMAND_FILE, @ahk.class::RESPONSE_FILE].each do |file|
+          File.delete(file) if File.exist?(file)
         end
       end
 
@@ -263,7 +263,8 @@ class WalmartGroceryAssistant
       matches.first[:item]
     else
       # Multiple fuzzy matches - user needs to choose
-      handle_multiple_matches(item_name, matches)
+      result = handle_multiple_matches(item_name, matches)
+      return result == :search_new_item ? nil : result
     end
   end
 
@@ -324,12 +325,16 @@ class WalmartGroceryAssistant
   end
 
   def handle_multiple_matches(item_name, matches)
-    # Prepare match list for AHK selection
-    match_options = matches.map.with_index do |match, index|
+    # Prepare match list for AHK selection (AHK will add numbers automatically)
+    match_options = matches.map do |match|
       item = match[:item]
       display_priority = item[:priority].nil? || item[:priority] == '' ? 'blank (=1)' : item[:priority]
-      "#{index + 1}. #{item[:description]} (Priority: #{display_priority}, Score: #{match[:score]})"
+      "#{item[:description]} (Priority: #{display_priority}, Score: #{match[:score]})"
     end
+    
+    # Add option to search for new item
+    search_option_number = match_options.length + 1
+    match_options << "Search for new item: '#{item_name}'"
 
     selection = @ahk.show_multiple_choice(
       title: "Multiple matches for: #{item_name}",
@@ -337,7 +342,15 @@ class WalmartGroceryAssistant
       allow_skip: true
     )
 
-    return matches[selection - 1][:item] if selection && selection > 0 && selection <= matches.length
+    # Check if user selected existing match
+    if selection && selection > 0 && selection <= matches.length
+      return matches[selection - 1][:item]
+    end
+    
+    # Check if user selected "search for new item"
+    if selection == search_option_number
+      return :search_new_item
+    end
 
     nil # User skipped or invalid selection
   end
@@ -354,17 +367,40 @@ class WalmartGroceryAssistant
       # Check if item exists in database
       db_item = find_item_in_database(item_name)
 
-      if db_item
+      if db_item && db_item != :search_new_item
         puts "   ✅ Found in database: #{db_item[:prod_id]} - #{db_item[:description]}"
         navigate_to_known_item(db_item)
-      else
-        puts '   🔍 New item - will search'
+        
+        puts '   💬 Showing user interaction dialog...'
+        sleep(1)
+        handle_user_interaction(item_name, db_item)
+      elsif db_item == :search_new_item
+        puts '   🔍 User selected "Search for new item" - searching Walmart...'
         search_for_new_item(item_name)
+        puts '   📍 Navigate to the product you want, then press Ctrl+Shift+A to add it'
+        puts '   🔄 Or press Ctrl+Shift+R to continue to next item'
+        @ahk.wait_for_user
+        
+        # Check if user added an item during the wait
+        response = @ahk.read_response
+        if response && !response.empty? && response != 'cancelled'
+          # New combined approach handles add+purchase in one step
+          handle_add_new_item(response)
+        end
+      else
+        puts '   🔍 New item - searching Walmart...'
+        search_for_new_item(item_name)
+        puts '   📍 Navigate to the product you want, then press Ctrl+Shift+A to add it'
+        puts '   🔄 Or press Ctrl+Shift+R to continue to next item'
+        @ahk.wait_for_user
+        
+        # Check if user added an item during the wait
+        response = @ahk.read_response
+        if response && !response.empty? && response != 'cancelled'
+          # New combined approach handles add+purchase in one step
+          handle_add_new_item(response)
+        end
       end
-
-      puts '   💬 Showing user interaction dialog...'
-      sleep(1)
-      handle_user_interaction(item_name, db_item)
     end
   end
 
@@ -376,6 +412,143 @@ class WalmartGroceryAssistant
   def search_for_new_item(item_name)
     @ahk.search_walmart(item_name)
     sleep(2)
+  end
+
+  def handle_add_new_item(response_data)
+    parts = response_data.split('|')
+    
+    # Check if this is the new combined format
+    if parts[0] == 'add_and_purchase' && parts.length >= 8
+      return handle_add_and_purchase(parts[1..-1])
+    end
+    
+    # Original format: description|modifier|priority|default_quantity|url
+    return nil if parts.length < 5
+    
+    description = parts[0].strip
+    modifier = parts[1].strip
+    priority = parts[2].strip.to_i
+    default_quantity = parts[3].strip.to_i
+    url = parts[4].strip
+    
+    return nil if description.empty? || url.empty?
+    
+    # Extract product ID from URL
+    prod_id = @db.extract_prod_id_from_url(url)
+    return nil unless prod_id
+    
+    # Check if item already exists
+    existing_item = @db.find_item_by_prod_id(prod_id)
+    if existing_item
+      puts "⚠️  Item already exists in database: #{existing_item[:description]}"
+      return nil
+    end
+    
+    # Create new item in database
+    @db.create_item(
+      prod_id: prod_id,
+      url: url,
+      description: description,
+      modifier: modifier.empty? ? nil : modifier,
+      default_quantity: default_quantity,
+      priority: priority
+    )
+    
+    puts "✅ Added new item: #{description}"
+    puts "   Modifier: #{modifier.empty? ? '(none)' : modifier}"
+    puts "   Priority: #{priority}"
+    puts "   Default Qty: #{default_quantity}"
+    puts "   Product ID: #{prod_id}"
+    
+    # Update Google Sheets
+    @sheets_sync.update_item_url(description, url) if @sheets_sync
+    
+    # Return the newly created item data
+    {
+      prod_id: prod_id,
+      url: url,
+      description: description,
+      modifier: modifier.empty? ? nil : modifier,
+      default_quantity: default_quantity,
+      priority: priority
+    }
+  end
+
+  def handle_add_and_purchase(parts)
+    # Format: description|modifier|priority|default_quantity|url|price|purchase_quantity
+    return nil if parts.length < 7
+    
+    description = parts[0].strip
+    modifier = parts[1].strip
+    priority = parts[2].strip.to_i
+    default_quantity = parts[3].strip.to_i
+    url = parts[4].strip
+    price_str = parts[5].strip
+    purchase_quantity_str = parts[6].strip
+    
+    return nil if description.empty? || url.empty?
+    
+    # Extract product ID from URL
+    prod_id = @db.extract_prod_id_from_url(url)
+    return nil unless prod_id
+    
+    # Check if item already exists
+    existing_item = @db.find_item_by_prod_id(prod_id)
+    if existing_item
+      puts "⚠️  Item already exists in database: #{existing_item[:description]}"
+      return nil
+    end
+    
+    # Create new item in database
+    @db.create_item(
+      prod_id: prod_id,
+      url: url,
+      description: description,
+      modifier: modifier.empty? ? nil : modifier,
+      default_quantity: default_quantity,
+      priority: priority
+    )
+    
+    puts "✅ Added new item: #{description}"
+    puts "   Modifier: #{modifier.empty? ? '(none)' : modifier}"
+    puts "   Priority: #{priority}"
+    puts "   Default Qty: #{default_quantity}"
+    puts "   Product ID: #{prod_id}"
+    
+    # Update Google Sheets
+    @sheets_sync.update_item_url(description, url) if @sheets_sync
+    
+    # Record purchase if price was provided
+    if !price_str.empty?
+      begin
+        price_float = Float(price_str)
+        purchase_quantity = Integer(purchase_quantity_str)
+        price_cents = (price_float * 100).to_i
+        
+        new_item = {
+          prod_id: prod_id,
+          description: description,
+          default_quantity: default_quantity
+        }
+        
+        record_purchase(new_item, price_cents: price_cents, quantity: purchase_quantity)
+        puts "✅ Recorded purchase: #{purchase_quantity}x #{description} @ $#{price_str}"
+      rescue ArgumentError
+        puts "⚠️ Invalid price or quantity format, item added but no purchase recorded"
+      end
+    else
+      puts "✅ Item added without purchase (no price provided)"
+    end
+    
+    # Return the newly created item data (for consistency, though not used in the new flow)
+    {
+      prod_id: prod_id,
+      url: url,
+      description: description,
+      modifier: modifier.empty? ? nil : modifier,
+      default_quantity: default_quantity,
+      priority: priority
+    }
   end
 
   def handle_user_interaction(item_name, db_item = nil)
@@ -556,6 +729,31 @@ class WalmartGroceryAssistant
       puts "📊 Recorded purchase: #{quantity}x #{item[:description]} @ #{price_display}".colorize(:blue)
     else
       puts "📊 Recorded purchase: #{quantity}x #{item[:description]} (no price)".colorize(:blue)
+    end
+  end
+
+  def wait_for_ahk_shutdown
+    loop do
+      sleep(1)
+      status = @ahk.check_status
+      
+      case status
+      when 'SHUTDOWN'
+        puts '✅ User requested exit'
+        break
+      when 'UNKNOWN'
+        puts '✅ AutoHotkey process ended'
+        break
+      end
+      
+      # Check if user added any new items
+      if File.exist?(@ahk.class::RESPONSE_FILE)
+        response = @ahk.read_response
+        if response && !response.empty? && response != 'cancelled'
+          puts '📦 Processing newly added item...'
+          handle_add_new_item(response)
+        end
+      end
     end
   end
 end

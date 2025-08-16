@@ -33,6 +33,11 @@ class AhkBridge
     send_command('WAIT_FOR_USER')
   end
 
+  def show_add_item_dialog(suggested_name = '')
+    send_command("ADD_ITEM_DIALOG|#{suggested_name}")
+    read_response
+  end
+
   def show_item_prompt(item_name, is_known: false, url: '', description: '', item_description: '', default_quantity: 1)
     params = "#{item_name}|#{is_known}|#{url}|#{description}|#{item_description}|#{default_quantity}"
     puts '🎭 About to send SHOW_ITEM_PROMPT command...'.colorize(:yellow)
@@ -96,15 +101,13 @@ class AhkBridge
     read_response
   end
 
+
   def cleanup
-    # Clean shutdown without waiting for response
+    # Gentle cleanup - just reset session but don't terminate AHK
     send_command('SESSION_COMPLETE') if File.exist?(COMMAND_FILE)
     
-    # Give AHK a moment to process the command
-    sleep(1)
-    
-    # Clean up any leftover files
-    [COMMAND_FILE, STATUS_FILE, RESPONSE_FILE].each do |file|
+    # Clean up communication files but leave AHK running
+    [COMMAND_FILE, RESPONSE_FILE].each do |file|
       File.delete(file) if File.exist?(file)
     end
   end
@@ -117,6 +120,16 @@ class AhkBridge
     File.delete(STATUS_FILE) if File.exist?(STATUS_FILE)
     sleep(0.1) # Small delay to ensure file system operations complete
     status
+  end
+
+  def read_response
+    return '' unless File.exist?(RESPONSE_FILE)
+
+    response = File.read(RESPONSE_FILE).strip
+    # Delete the response file immediately after reading to prevent stale data
+    File.delete(RESPONSE_FILE) if File.exist?(RESPONSE_FILE)
+    sleep(0.1) # Small delay to ensure file system operations complete
+    response
   end
 
   private
@@ -140,8 +153,7 @@ class AhkBridge
     Timeout.timeout(timeout) do
       loop do
         status = check_status
-        puts "  ← AHK Status: #{status}".colorize(:light_black)
-
+        
         case status
         when 'READY'
           return true
@@ -153,7 +165,8 @@ class AhkBridge
           response = read_response
           raise "AHK Error: #{response}"
         when 'SHUTDOWN'
-          raise 'AHK script was shut down by user'
+          puts '  ℹ️ AutoHotkey script shutting down (user-initiated via Ctrl+Shift+Q)'
+          return true
         when 'WAITING_FOR_USER'
           puts '🛑 AHK is waiting for user action...'.colorize(:yellow)
           # Don't return - keep waiting until user presses Ctrl+Shift+R
@@ -165,15 +178,5 @@ class AhkBridge
     end
   rescue Timeout::Error
     raise "AHK command timed out after #{timeout} seconds"
-  end
-
-  def read_response
-    return '' unless File.exist?(RESPONSE_FILE)
-
-    response = File.read(RESPONSE_FILE).strip
-    # Delete the response file immediately after reading to prevent stale data
-    File.delete(RESPONSE_FILE) if File.exist?(RESPONSE_FILE)
-    sleep(0.1) # Small delay to ensure file system operations complete
-    response
   end
 end
