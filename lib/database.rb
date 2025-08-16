@@ -40,18 +40,31 @@ class WalmartDatabase
     @items.where(Sequel.ilike(:description, "%#{description}%")).first
   end
 
-  def create_item(prod_id:, url:, description:, modifier: nil, default_quantity: 1, priority: 0)
+  def find_all_items_by_description(description)
+    @items.where(Sequel.ilike(:description, "%#{description}%")).order(:priority, :description).all
+  end
+
+  def create_item(prod_id:, url:, description:, modifier: nil, default_quantity: 1, priority: 1)
+    # Normalize priority: treat nil or empty as 1 (highest priority)
+    normalized_priority = (priority.nil? || priority == '') ? 1 : priority
+    
     @items.insert(
       prod_id: prod_id,
       url: url,
       description: description,
       modifier: modifier,
       default_quantity: default_quantity,
-      priority: priority
+      priority: normalized_priority
     )
   end
 
   def update_item(prod_id, updates)
+    # Normalize priority if it's being updated
+    if updates.key?(:priority)
+      priority = updates[:priority]
+      updates[:priority] = (priority.nil? || priority == '') ? 1 : priority
+    end
+    
     @items.where(prod_id: prod_id).update(updates.merge(updated_at: Time.now))
   end
 
@@ -59,8 +72,15 @@ class WalmartDatabase
     @items.where(prod_id: prod_id).update(description: new_description)
   end
 
+  def delete_item(prod_id)
+    # First delete all purchase records for this item
+    @purchases.where(prod_id: prod_id).delete
+    # Then delete the item itself
+    @items.where(prod_id: prod_id).delete
+  end
+
   def get_all_items_by_priority
-    @items.order(Sequel.desc(:priority), :description).all
+    @items.order(:description, :priority).all
   end
 
   # Purchase management methods

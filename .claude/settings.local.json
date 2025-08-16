@@ -1,8 +1,9 @@
 {
   "permissions": {
-    "defaultMode": "acceptEdits",
     "allow": [
-      "Bash(ruby:*)"
-    ]
+      "Bash(ruby:*)",
+      "Bash(cat:*)"
+    ],
+    "defaultMode": "acceptEdits"
   }
 }

@@ -49,8 +49,16 @@
 - `.env` - Database credentials and Google Sheets ID
 - `google_credentials.json` - Google API service account key
 
+## Race Condition Fix (August 2025)
+- **Issue Identified**: File-based IPC had race condition where Ruby read stale "COMPLETED" status from previous commands
+- **Root Cause**: Status and response files weren't deleted after reading, causing timing conflicts
+- **Debug Evidence**: With breakpoints all commands received; without breakpoints SHOW_ITEM_PROMPT commands dropped
+- **Solution Applied**: Immediate file deletion after reading in `check_status()` and `read_response()` with 0.1s delays
+- **Status**: ✅ FIXED - All commands (SHOW_PROGRESS, OPEN_URL, SHOW_ITEM_PROMPT) now working correctly
+- **Files Renamed**: `grocery_automation_hotkey.ahk` → `grocery_automation.ahk` with window targeting improvements
+
 ## Next Steps if Continued
-- Test the new URL capture functionality with actual new items
+- Test with main grocery_automation.ahk script (currently tested with simple_test.ahk)
 - Push git repository to GitHub (need to create `shopping_ahk` repo first)
 - Monitor purchase history accumulation over time
 - Consider any additional automation features

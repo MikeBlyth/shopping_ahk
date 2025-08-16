@@ -30,25 +30,31 @@ class WalmartGroceryAssistant
     grocery_items = load_items_to_order
 
     if grocery_items.empty?
+      puts "No items found to order."
       @ahk.show_message("No items found to order.\n\nPlease set quantity > 0 for items in your Google Sheet.")
-      return
+    else
+      puts "🛍️ Found #{grocery_items.length} items to order"
+      puts '🚀 Starting shopping automation...'
+
+      process_grocery_list(grocery_items)
+
+      @ahk.show_message("Shopping complete!\n\nReview your cart and proceed to checkout when ready.")
     end
 
-    puts "🛍️ Found #{grocery_items.length} items to order"
-    puts '🚀 Starting shopping automation...'
-
-    process_grocery_list(grocery_items)
-
-    # Sync any new items back to Google Sheets
-    puts '💾 Syncing new items back to Google Sheets...'
+    # Always sync database items back to Google Sheets (regardless of whether items were ordered)
+    puts '💾 Syncing database items to Google Sheets...'
     sync_database_to_sheets
 
-    @ahk.show_message("Shopping complete!\n\nReview your cart and proceed to checkout when ready.")
-
-    # Reset AutoHotkey for next session
-    puts '🔄 Resetting for next session...'
-    @ahk.session_complete
-    puts '✅ Ready for next shopping session!'
+    # Clean exit - no need to reset AutoHotkey if no shopping occurred
+    if grocery_items.empty?
+      puts '✅ Sync completed. No shopping session to reset.'
+      @ahk.cleanup if @ahk
+    else
+      # Reset AutoHotkey for next session only if we actually shopped
+      puts '🔄 Resetting for next session...'
+      @ahk.session_complete
+      puts '✅ Ready for next shopping session!'
+    end
   rescue StandardError => e
     puts "\n❌ An error occurred: #{e.message}"
     puts "📍 Location: #{e.backtrace.first}"
@@ -115,7 +121,7 @@ class WalmartGroceryAssistant
     # Start fresh AutoHotkey script
     puts '🚀 Starting fresh AutoHotkey script...'
     start_ahk_script
-    sleep(3) # Give it time to start
+    sleep(1) # Give it time to start
 
     # Check if it started successfully
     if ahk_process_running?
@@ -345,9 +351,6 @@ class WalmartGroceryAssistant
       # FAILSAFE: 4-second delay between items to prevent runaway behavior
       puts '⏳ Failsafe delay (4 seconds)...'
 
-      # Show progress
-      @ahk.show_progress(index + 1, items.length, item_name)
-
       # Check if item exists in database
       db_item = find_item_in_database(item_name)
 
@@ -360,7 +363,7 @@ class WalmartGroceryAssistant
       end
 
       puts '   💬 Showing user interaction dialog...'
-      sleep(4)
+      sleep(1)
       handle_user_interaction(item_name, db_item)
     end
   end

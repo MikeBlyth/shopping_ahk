@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "rdbg",
+      "name": "Debug: grocery_bot.rb",
+      "request": "launch",
+      "script": "${workspaceFolder}/grocery_bot.rb",
+      "useBundler": true,
+      "stopOnEntry": false, 
+    },
+    {
+      "type": "autohotkey",
+      "request": "launch",
+      "name": "Debug: AHK Script",
+      "program": "${workspaceFolder}/simple_test.ahk"
+    }
+  ]
+}

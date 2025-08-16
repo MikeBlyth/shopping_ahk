@@ -48,12 +48,6 @@ class AhkBridge
     end
   end
 
-  def show_progress(current, total, item_name = '')
-    params = "#{current}|#{total}|#{item_name}"
-    send_command("SHOW_PROGRESS|#{params}")
-    read_response
-  end
-
   def show_message(message)
     send_command("SHOW_MESSAGE|#{message}")
     read_response
@@ -102,13 +96,26 @@ class AhkBridge
     read_response
   end
 
+  def cleanup
+    # Clean shutdown without waiting for response
+    send_command('SESSION_COMPLETE') if File.exist?(COMMAND_FILE)
+    
+    # Give AHK a moment to process the command
+    sleep(1)
+    
+    # Clean up any leftover files
+    [COMMAND_FILE, STATUS_FILE, RESPONSE_FILE].each do |file|
+      File.delete(file) if File.exist?(file)
+    end
+  end
+
   def check_status
     return 'UNKNOWN' unless File.exist?(STATUS_FILE)
 
     status = File.read(STATUS_FILE).strip
     # Delete the status file immediately after reading to prevent stale data
     File.delete(STATUS_FILE) if File.exist?(STATUS_FILE)
-    sleep(0.1)  # Small delay to ensure file system operations complete
+    sleep(0.1) # Small delay to ensure file system operations complete
     status
   end
 
@@ -124,22 +131,12 @@ class AhkBridge
   def write_command(command)
     File.write(COMMAND_FILE, command)
     puts "  → AHK Command: #{command.split('|').first}".colorize(:light_black)
-
-    # Debug: Verify file was written
-    if File.exist?(COMMAND_FILE)
-      written_content = File.read(COMMAND_FILE)
-      if written_content != command
-        puts "  ⚠️  Command file mismatch! Expected: #{command}, Got: #{written_content}".colorize(:red)
-      end
-    else
-      puts '  ❌ Command file not created!'.colorize(:red)
-    end
   end
 
   def wait_for_completion(timeout)
     # Clear any stale response file before starting
     File.delete(RESPONSE_FILE) if File.exist?(RESPONSE_FILE)
-    
+
     Timeout.timeout(timeout) do
       loop do
         status = check_status
@@ -176,7 +173,7 @@ class AhkBridge
     response = File.read(RESPONSE_FILE).strip
     # Delete the response file immediately after reading to prevent stale data
     File.delete(RESPONSE_FILE) if File.exist?(RESPONSE_FILE)
-    sleep(0.1)  # Small delay to ensure file system operations complete
+    sleep(0.1) # Small delay to ensure file system operations complete
     response
   end
 end
