@@ -1,0 +1,14 @@
+Matching tests
+
+The db search may have multiple exact matches to description or an exact and one or more partial matches. It's OK to have the multiple matches in the search result, but if there multiples, they may or may not be shown to the user.
+
+Coffee
+- Should navigate to 526192619 because that is an exact match
+
+Cottage cheese
+- Should navigate to 10315024 because it is the highest priority (1) of three matches
+
+Tea
+- Should present 20567607 (Iced tea bags) and 10315396 (tea bags) and ask the user to choose
+
+

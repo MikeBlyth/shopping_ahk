@@ -55,6 +55,14 @@
 - Monitor purchase history accumulation over time
 - Consider any additional automation features
 
+## Item Matching Rules
+- **No 1:1 mapping**: Multiple database items can match a single sheet description
+- **Sheet sync behavior**: When reading sheet, add new items (if prod_id present) or update existing items with changed fields (add-or-update pattern)
+- **Multiple match handling**: When shopping list has multiple matches, AHK should prompt user to choose (numbered list)
+- **Match ranking**: Closer, more exact matches should rank higher in selection list
+- **Priority handling**: For exact matches with different priorities, automatically navigate to highest priority item (lower number = higher priority, 1 = highest priority)
+- **Priority purpose**: Eventually allows skipping "unavailable" items and using lower priority alternatives
+
 ## Important Notes
 - All sensitive files (.env, credentials) are properly gitignored
 - AutoHotkey lifecycle managed automatically (no manual cleanup needed)
