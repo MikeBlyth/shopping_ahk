@@ -6,18 +6,24 @@ google_credentials.json
 ahk_status.txt
 ahk_command.txt
 ahk_response.txt
+ahk_debug.txt
+command_debug.txt
+
 
 # Test files
-test_*.ahk
+test_*
 minimal_test.ahk
-debug_*.ahk
+debug_*
 show_all_windows.ahk
 just_switch_browser.ahk
 
 # Backup and temporary files
 *.bak
 *.tmp
+*.sav
+*.csv
 *~
+walmart_backup_*
 
 # Ruby
 .bundle/
