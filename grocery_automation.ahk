@@ -10,9 +10,22 @@ ResponseFile := ScriptDir . "\ahk_response.txt"
 ; Global variables
 UserReady := false
 WaitingForUser := false
+StatusGui := ""
 
 ; Initialize
 WriteStatus("WAITING_FOR_HOTKEY")
+
+; Clear debug log at startup
+try {
+    FileDelete("command_debug.txt")
+    FileAppend("=== AutoHotkey started at " . A_Now . " ===`n", "command_debug.txt")
+} catch {
+    ; Ignore errors if file doesn't exist
+}
+
+; Show initial status
+ShowPersistentStatus("Assistant ready - waiting for Ctrl+Shift+R to start shopping list, press Ctrl+Shift+Q to quit")
+
 MsgBox("AutoHotkey ready!`n`nInstructions:`n1. Start ruby grocery_bot.rb`n2. Open/switch to your Walmart page`n3. Press Ctrl+Shift+R when ready", "Walmart Assistant", "OK")
 
 ; Hotkey to signal readiness
@@ -31,7 +44,11 @@ MsgBox("AutoHotkey ready!`n`nInstructions:`n1. Start ruby grocery_bot.rb`n2. Ope
             MsgBox("Could not find an active window handle.")
             ExitApp
         }
+        
         MsgBox("Ready signal received!", "Test Script", "OK")
+        
+        ; Update status for shopping mode after dialog closes
+        ShowPersistentStatus("Assistant processing shopping list, press Ctrl+Shift+Q to quit")
     }
 }
 
@@ -47,6 +64,9 @@ Loop {
 }
 
 ProcessCommand(command) {
+    ; Debug: Log all commands received
+    FileAppend("Received command: '" . command . "'`n", "command_debug.txt")
+    
     pipe_pos := InStr(command, "|")
     if (pipe_pos > 0) {
         action := SubStr(command, 1, pipe_pos - 1)
@@ -56,34 +76,64 @@ ProcessCommand(command) {
         param := ""
     }
     
+    ; Debug: Log parsed action and param
+    FileAppend("Parsed action: '" . action . "', param: '" . param . "'`n", "command_debug.txt")
+    
     WriteStatus("PROCESSING")
     
     switch action {
         case "OPEN_URL":
+            FileAppend("MATCHED OPEN_URL`n", "command_debug.txt")
             OpenURL(param)
         case "SEARCH":
+            FileAppend("MATCHED SEARCH`n", "command_debug.txt")
             SearchWalmart(param)
         case "GET_URL":
+            FileAppend("MATCHED GET_URL`n", "command_debug.txt")
             GetCurrentURL()
         case "ACTIVATE_BROWSER":
+            FileAppend("MATCHED ACTIVATE_BROWSER`n", "command_debug.txt")
             ActivateBrowserCommand()
         case "SHOW_MESSAGE":
+            FileAppend("MATCHED SHOW_MESSAGE`n", "command_debug.txt")
             ShowMessage(param)
         case "SHOW_ITEM_PROMPT":
+            FileAppend("MATCHED SHOW_ITEM_PROMPT`n", "command_debug.txt")
             ShowItemPrompt(param)
         case "SHOW_MULTIPLE_CHOICE":
+            FileAppend("MATCHED SHOW_MULTIPLE_CHOICE`n", "command_debug.txt")
             ShowMultipleChoice(param)
         case "GET_PRICE_INPUT":
+            FileAppend("MATCHED GET_PRICE_INPUT`n", "command_debug.txt")
             GetPriceInput()
         case "WAIT_FOR_CONTINUE":
+            FileAppend("MATCHED WAIT_FOR_CONTINUE`n", "command_debug.txt")
             WaitForContinue()
         case "SESSION_COMPLETE":
+            FileAppend("MATCHED SESSION_COMPLETE`n", "command_debug.txt")
             ProcessSessionComplete()
         case "ADD_ITEM_DIALOG":
+            FileAppend("MATCHED ADD_ITEM_DIALOG`n", "command_debug.txt")
             ShowAddItemDialog(param)
         case "WAIT_FOR_USER":
+            FileAppend("MATCHED WAIT_FOR_USER`n", "command_debug.txt")
             WaitForUser()
+        case "TERMINATE":
+            FileAppend("MATCHED TERMINATE - shutting down`n", "command_debug.txt")
+            global StatusGui
+            
+            ; Close status window
+            if StatusGui != "" {
+                try {
+                    StatusGui.Destroy()
+                }
+            }
+            
+            WriteStatus("SHUTDOWN")
+            MsgBox("Ruby requested AutoHotkey shutdown", "Walmart Assistant", "OK")
+            ExitApp()
         default:
+            FileAppend("UNKNOWN COMMAND - action: '" . action . "', original: '" . command . "'`n", "command_debug.txt")
             WriteStatus("ERROR")
             WriteResponse("Unknown command: " . action)
     }
@@ -357,7 +407,7 @@ ShowMultipleChoice(param) {
 }
 
 GetPriceInput() {
-    result := InputBox("💰 Enter the current price (e.g., 3.45):", "Record Price", "w300 h150")
+    result := InputBox("Enter the current price (e.g., 3.45):", "Record Price", "w300 h150")
     
     if result.Result = "OK" && result.Value != "" {
         WriteResponse("price|" . result.Value)
@@ -391,19 +441,18 @@ WriteResponse(response) {
         if FileExist(ResponseFile)
             FileDelete(ResponseFile)
         FileAppend(response, ResponseFile)
-        ToolTip("DEBUG: Wrote response: " . SubStr(response, 1, 50) . "...", 400, 10)
-        SetTimer(() => ToolTip(), -2000)  ; Clear after 2 seconds
+        ToolTip("DEBUG: Wrote response: " . SubStr(response, 1, 50) . "...", 400, 50)
+        SetTimer(() => ToolTip("", 400, 50), -2000)  ; Clear debug tooltip after 2 seconds
     }
 }
 
-; Add a function to reset everything for next session
+; Reset state after shopping list completion
 ResetForNextSession() {
     global WaitingForUser, UserReady
     WaitingForUser := false
     UserReady := false
     WriteStatus("WAITING_FOR_HOTKEY")
-    ToolTip("Session complete. Ready for next session.`nPress Ctrl+Shift+R when on Walmart page to start again.", 10, 10)
-    SetTimer(() => ToolTip(), -5000)  ; Clear after 5 seconds
+    ; Tooltip is already set by ProcessSessionComplete, don't override it
 }
 
 WaitForContinue() {
@@ -436,12 +485,12 @@ WaitForUser() {
     WriteStatus("COMPLETED")
 }
 
-; Reset session to ready state
+; Shopping list processing complete
 ProcessSessionComplete() {
+    FileAppend("ProcessSessionComplete called - setting completion tooltip`n", "command_debug.txt")
     WriteResponse("session_reset")
     WriteStatus("WAITING_FOR_HOTKEY")
-    ToolTip("Shopping complete! Options:\n• Ctrl+Shift+A: Add more items\n• Ctrl+Shift+Q: Exit", 10, 10)
-    ; Don't clear tooltip - let it stay until user acts
+    ShowPersistentStatus("Shopping list complete! Press Ctrl+Shift+A to add or purchase item, Ctrl+Shift+Q to quit")
     ResetForNextSession()
 }
 
@@ -449,7 +498,15 @@ ProcessSessionComplete() {
 ; Hotkeys
 ^+q::{
     ; Clean exit - signal Ruby and shutdown
-    ToolTip()  ; Clear tooltip
+    global StatusGui
+    
+    ; Close status window
+    if StatusGui != "" {
+        try {
+            StatusGui.Destroy()
+        }
+    }
+    
     WriteResponse("quit")  ; Tell Ruby we're quitting
     WriteStatus("SHUTDOWN")
     MsgBox("AutoHotkey script shutting down...", "Walmart Assistant", "OK")
@@ -458,6 +515,7 @@ ProcessSessionComplete() {
 
 ^+a::{
     ; Add new item hotkey
+    FileAppend("Ctrl+Shift+A pressed - calling ShowAddItemDialogHotkey`n", "command_debug.txt")
     ShowAddItemDialogHotkey()
 }
 
@@ -476,11 +534,11 @@ ShowAddItemDialog(suggestedName) {
 }
 
 ShowAddItemDialogHotkey() {
-    ; Clear tooltip when user takes action
-    ToolTip()
+    FileAppend("ShowAddItemDialogHotkey called`n", "command_debug.txt")
     
     ; Get current URL (silent - doesn't write to response file)
     currentUrl := GetCurrentURLSilent()
+    FileAppend("Current URL captured: " . currentUrl . "`n", "command_debug.txt")
     
     ; Show dialog with empty suggested name (user triggered)
     ShowAddItemDialogWithDefaults("", currentUrl)
@@ -600,6 +658,7 @@ AddAndPurchaseClickHandler(gui) {
     
     ; Format response with purchase info
     response := "add_and_purchase|" . description . "|" . modifier . "|" . priority . "|" . defaultQuantity . "|" . gui.currentUrl . "|" . price . "|" . purchaseQuantity
+    FileAppend("AddAndPurchaseClickHandler - writing response: " . response . "`n", "command_debug.txt")
     WriteResponse(response)
     WriteStatus("COMPLETED")
     WaitingForUser := false  ; End the wait state
@@ -644,6 +703,7 @@ AddOnlyClickHandler(gui) {
     
     ; Format response without purchase info (original format)
     response := description . "|" . modifier . "|" . priority . "|" . defaultQuantity . "|" . gui.currentUrl
+    FileAppend("AddOnlyClickHandler - writing response: " . response . "`n", "command_debug.txt")
     WriteResponse(response)
     WriteStatus("COMPLETED")
     WaitingForUser := false  ; End the wait state
@@ -659,4 +719,30 @@ CancelItemClickHandler(gui) {
     WriteStatus("COMPLETED")
     WaitingForUser := false  ; End the wait state
     gui.Destroy()
+}
+
+; Create a persistent status window
+ShowPersistentStatus(message) {
+    global StatusGui
+    
+    ; Close existing status window if any
+    if StatusGui != "" {
+        try {
+            StatusGui.Destroy()
+        }
+    }
+    
+    ; Create a new status GUI with styling
+    StatusGui := Gui("+AlwaysOnTop +LastFound -MaximizeBox -MinimizeBox +Resize", "Assistant Status")
+    StatusGui.BackColor := "0x2D3748"  ; Dark blue-gray background
+    StatusGui.SetFont("s12 Bold", "Segoe UI")
+    
+    ; Add status text with light color
+    statusText := StatusGui.Add("Text", "x20 y15 w400 h60 c0xF7FAFC Center", message)
+    
+    ; Position in top-right corner with more margin (100px further left)
+    StatusGui.Show("x" . (A_ScreenWidth - 900) . " y20 w440 h90 NoActivate")
+    
+    ; Make it stay on top but not steal focus
+    WinSetAlwaysOnTop(1, StatusGui.Hwnd)
 }

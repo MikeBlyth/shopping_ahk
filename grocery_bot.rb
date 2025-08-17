@@ -31,7 +31,6 @@ class WalmartGroceryAssistant
 
     if grocery_items.empty?
       puts "No items found to order."
-      @ahk.show_message("No items found to order.\n\nAdd items to your Google Sheet (blank quantity = 1, explicit 0 = don't order).")
     else
       puts "🛍️ Found #{grocery_items.length} items to order"
       puts '🚀 Starting shopping automation...'
@@ -41,22 +40,23 @@ class WalmartGroceryAssistant
       @ahk.show_message("Shopping complete!\n\nReview your cart and proceed to checkout when ready.")
     end
 
-    # Always sync database items back to Google Sheets (regardless of whether items were ordered)
-    puts '💾 Syncing database items to Google Sheets...'
-    sync_database_to_sheets
-
-    # Shopping list processing complete - now wait for user to decide when to end
+    # Shopping list processing complete - signal session complete to show persistent tooltip
     if grocery_items.empty?
-      puts '✅ Sync completed.'
-      @ahk.show_message("No items to order.\n\nPress Ctrl+Shift+Q when you're ready to exit.")
+      puts '✅ No items processed.'
     else
       puts '✅ Shopping list processing complete!'
-      @ahk.show_message("Shopping list complete!\n\nYou can:\n• Press Ctrl+Shift+A to add more items\n• Press Ctrl+Shift+Q to exit")
     end
+    
+    # Signal AHK to show completion status and persistent tooltip (don't read response)
+    @ahk.send_command('SESSION_COMPLETE')
     
     # Wait for AHK to signal that user wants to end
     puts '⏳ Waiting for user to exit (Ctrl+Shift+Q)...'
     wait_for_ahk_shutdown
+    
+    # Sync database items back to Google Sheets when user is done
+    puts '💾 Syncing database items to Google Sheets...'
+    sync_database_to_sheets
   rescue StandardError => e
     puts "\n❌ An error occurred: #{e.message}"
     puts "📍 Location: #{e.backtrace.first}"
@@ -75,15 +75,8 @@ class WalmartGroceryAssistant
   private
 
   def setup_cleanup_handlers
-    # Cleanup on normal exit
+    # at_exit handles ALL exit scenarios: normal exit, exceptions, interrupts, crashes, etc.
     at_exit { cleanup_on_exit }
-
-    # Cleanup on interrupt (Ctrl+C)
-    Signal.trap('INT') { cleanup_and_exit('Interrupted by user') }
-    Signal.trap('TERM') { cleanup_and_exit('Process terminated') }
-
-    # Cleanup on uncaught exceptions
-    Thread.abort_on_exception = false
   end
 
   def cleanup_on_exit
@@ -92,13 +85,11 @@ class WalmartGroceryAssistant
     @cleanup_done = true
 
     begin
-      puts "\n🧹 Cleaning up..."
+      puts "\n🧹 Cleaning up and signaling AutoHotkey to close..."
 
-      # Clean up communication files (AHK controls its own termination)
+      # Signal AHK to terminate gracefully
       if @ahk
-        [@ahk.class::COMMAND_FILE, @ahk.class::RESPONSE_FILE].each do |file|
-          File.delete(file) if File.exist?(file)
-        end
+        @ahk.terminate_ahk
       end
 
       puts '✅ Cleanup complete'
@@ -107,11 +98,6 @@ class WalmartGroceryAssistant
     end
   end
 
-  def cleanup_and_exit(reason)
-    puts "\n⚠️ #{reason}"
-    cleanup_on_exit
-    exit(1)
-  end
 
   def setup_ahk
     # Always start fresh - kill any existing AutoHotkey and clean files
@@ -908,10 +894,30 @@ class WalmartGroceryAssistant
   end
 
   def wait_for_ahk_shutdown
-    loop do
-      sleep(1)
+    puts "🔍 DEBUG: Starting wait_for_ahk_shutdown loop..."
+    
+    # Check for any existing response file and process it
+    if File.exist?(@ahk.class::RESPONSE_FILE)
+      puts "🔍 DEBUG: Found existing response file, processing..."
+      response = @ahk.read_response
+      puts "🔍 DEBUG: Read response: '#{response}'"
       
-      # Check if AHK wrote a response (only happens when user adds item or quits)
+      if response == 'quit' || response == 'shutdown'
+        puts '✅ User requested exit'
+        return # Exit the function, which will end wait_for_ahk_shutdown
+      elsif response == 'session_reset'
+        puts '🔍 DEBUG: Session complete confirmation received'
+        puts '⏳ Waiting for user to exit (Ctrl+Shift+Q) or add items (Ctrl+Shift+A)...'
+      elsif response && !response.empty? && response != 'cancelled'
+        puts '📦 Processing existing item response...'
+        handle_add_new_item(response)
+      end
+    end
+    
+    loop do
+      sleep(0.5)  # Check twice per second
+      
+      # Check if AHK wrote a response (happens for session_reset, add item, or quit)
       if File.exist?(@ahk.class::RESPONSE_FILE)
         puts "🔍 DEBUG: Found response file, reading..."
         response = @ahk.read_response
@@ -920,6 +926,10 @@ class WalmartGroceryAssistant
         if response == 'quit' || response == 'shutdown'
           puts '✅ User requested exit'
           break
+        elsif response == 'session_reset'
+          puts '🔍 DEBUG: Session complete confirmation received'
+          puts '⏳ Waiting for user to exit (Ctrl+Shift+Q) or add items (Ctrl+Shift+A)...'
+          # Continue monitoring
         elsif response && !response.empty? && response != 'cancelled'
           puts '📦 Processing newly added item...'
           handle_add_new_item(response)
@@ -927,9 +937,6 @@ class WalmartGroceryAssistant
           puts "🔍 DEBUG: Response was empty, cancelled, or nil"
         end
       end
-      
-      # Don't check status constantly - just wait for response file or manual exit
-      # AHK will send "quit" response when user presses Ctrl+Shift+Q
     end
   end
 end

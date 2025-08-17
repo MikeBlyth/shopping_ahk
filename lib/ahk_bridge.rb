@@ -9,19 +9,19 @@ class AhkBridge
     clear_files
   end
 
-  def send_command(command, timeout: 300)
+  def send_command(command, timeout: nil)
     write_command(command)
     wait_for_completion(timeout)
   end
 
   def open_url(url)
     puts "🌐 Opening URL via AHK: #{url}".colorize(:blue)
-    send_command("OPEN_URL|#{url}")
+    send_command("OPEN_URL|#{url}", timeout: 30)  # 30 second timeout for navigation
   end
 
   def search_walmart(search_term)
     puts "🔍 Searching Walmart via AHK: #{search_term}".colorize(:blue)
-    send_command("SEARCH|#{search_term}")
+    send_command("SEARCH|#{search_term}", timeout: 30)  # 30 second timeout for search
   end
 
   def get_current_url
@@ -54,7 +54,7 @@ class AhkBridge
   end
 
   def show_message(message)
-    send_command("SHOW_MESSAGE|#{message}")
+    send_command("SHOW_MESSAGE|#{message}")  # No timeout - can wait indefinitely
     read_response
   end
 
@@ -112,6 +112,22 @@ class AhkBridge
     end
   end
 
+  def terminate_ahk
+    # Signal AHK to terminate gracefully
+    begin
+      File.write(COMMAND_FILE, 'TERMINATE')
+      puts "📤 Sent termination signal to AutoHotkey"
+      sleep(1) # Give AHK time to process the command
+    rescue => e
+      puts "⚠️ Failed to send termination signal: #{e.message}"
+    end
+    
+    # Clean up files
+    [COMMAND_FILE, STATUS_FILE, RESPONSE_FILE].each do |file|
+      File.delete(file) if File.exist?(file)
+    end
+  end
+
   def check_status
     return 'UNKNOWN' unless File.exist?(STATUS_FILE)
 
@@ -150,8 +166,17 @@ class AhkBridge
     # Clear any stale response file before starting
     File.delete(RESPONSE_FILE) if File.exist?(RESPONSE_FILE)
 
-    Timeout.timeout(timeout) do
-      loop do
+    if timeout
+      Timeout.timeout(timeout) do
+        wait_loop
+      end
+    else
+      wait_loop
+    end
+  end
+
+  def wait_loop
+    loop do
         status = check_status
         
         case status
@@ -175,8 +200,7 @@ class AhkBridge
 
         sleep(0.5)
       end
-    end
+  end
   rescue Timeout::Error
     raise "AHK command timed out after #{timeout} seconds"
   end
-end
