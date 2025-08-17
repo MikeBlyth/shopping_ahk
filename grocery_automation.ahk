@@ -391,6 +391,8 @@ WriteResponse(response) {
         if FileExist(ResponseFile)
             FileDelete(ResponseFile)
         FileAppend(response, ResponseFile)
+        ToolTip("DEBUG: Wrote response: " . SubStr(response, 1, 50) . "...", 400, 10)
+        SetTimer(() => ToolTip(), -2000)  ; Clear after 2 seconds
     }
 }
 
@@ -446,8 +448,9 @@ ProcessSessionComplete() {
 
 ; Hotkeys
 ^+q::{
-    ; Clean exit - set status to indicate shutdown
+    ; Clean exit - signal Ruby and shutdown
     ToolTip()  ; Clear tooltip
+    WriteResponse("quit")  ; Tell Ruby we're quitting
     WriteStatus("SHUTDOWN")
     MsgBox("AutoHotkey script shutting down...", "Walmart Assistant", "OK")
     ExitApp()
@@ -485,11 +488,11 @@ ShowAddItemDialogHotkey() {
 
 ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     ; Create dialog
-    addItemGui := Gui("+AlwaysOnTop", "Add New Item & Purchase")
+    addItemGui := Gui("+AlwaysOnTop", "Add Item & Purchase")
     addItemGui.SetFont("s10")
     
     ; Description field
-    addItemGui.Add("Text", , "Item Description:")
+    addItemGui.Add("Text", , "Item Description (leave blank for purchase-only):")
     descriptionEdit := addItemGui.Add("Edit", "w400 r1", suggestedName)
     
     ; Modifier field  
@@ -554,30 +557,45 @@ AddAndPurchaseClickHandler(gui) {
     price := Trim(gui.priceEdit.Text)
     purchaseQuantity := Trim(gui.purchaseQuantityEdit.Text)
     
-    if description = "" {
-        MsgBox("Description is required!", "Error")
+    ; Validate description (allow empty for purchase-only mode)
+    if StrLen(description) > 255 {
+        MsgBox("Description too long (max 255 characters)", "Error")
         return
     }
     
-    ; Validate priority
-    if priority = "" || !IsNumber(priority) || Integer(priority) < 1 {
+    ; If description is empty, this is purchase-only mode - require price
+    if description = "" && price = "" {
+        MsgBox("For purchase-only mode (empty description), you must enter a price!", "Price Required")
+        return
+    }
+    
+    ; Validate modifier
+    if StrLen(modifier) > 100 {
+        MsgBox("Modifier too long (max 100 characters)", "Error")
+        return
+    }
+    
+    ; Validate priority (1-10 range)
+    if priority = "" || !IsNumber(priority) || Integer(priority) < 1 || Integer(priority) > 10 {
         priority := "1"
     }
     
-    ; Validate default quantity
-    if defaultQuantity = "" || !IsNumber(defaultQuantity) || Integer(defaultQuantity) < 1 {
+    ; Validate default quantity (1-999 range)
+    if defaultQuantity = "" || !IsNumber(defaultQuantity) || Integer(defaultQuantity) < 1 || Integer(defaultQuantity) > 999 {
         defaultQuantity := "1"
     }
     
-    ; Validate purchase quantity
-    if purchaseQuantity = "" || !IsNumber(purchaseQuantity) || Integer(purchaseQuantity) < 1 {
+    ; Validate purchase quantity (1-999 range)
+    if purchaseQuantity = "" || !IsNumber(purchaseQuantity) || Integer(purchaseQuantity) < 1 || Integer(purchaseQuantity) > 999 {
         purchaseQuantity := "1"
     }
     
-    ; Validate price if provided
-    if price != "" && !IsNumber(price) {
-        MsgBox("Please enter a valid price (numbers only)", "Invalid Price")
-        return
+    ; Validate price if provided (max $9999.99)
+    if price != "" {
+        if !IsNumber(price) || Float(price) < 0 || Float(price) > 9999.99 {
+            MsgBox("Please enter a valid price between $0.00 and $9999.99", "Invalid Price")
+            return
+        }
     }
     
     ; Format response with purchase info
@@ -586,6 +604,9 @@ AddAndPurchaseClickHandler(gui) {
     WriteStatus("COMPLETED")
     WaitingForUser := false  ; End the wait state
     gui.Destroy()
+    
+    ; Show confirmation
+    MsgBox("Item '" . description . "' has been sent to Ruby for processing!", "Item Added", "OK")
 }
 
 AddOnlyClickHandler(gui) {
@@ -595,18 +616,29 @@ AddOnlyClickHandler(gui) {
     priority := Trim(gui.priorityEdit.Text)
     defaultQuantity := Trim(gui.defaultQuantityEdit.Text)
     
+    ; Validate description (required for Add Only)
     if description = "" {
-        MsgBox("Description is required!", "Error")
+        MsgBox("Description is required for Add Only mode!", "Error")
+        return
+    }
+    if StrLen(description) > 255 {
+        MsgBox("Description too long (max 255 characters)", "Error")
         return
     }
     
-    ; Validate priority
-    if priority = "" || !IsNumber(priority) || Integer(priority) < 1 {
+    ; Validate modifier
+    if StrLen(modifier) > 100 {
+        MsgBox("Modifier too long (max 100 characters)", "Error")
+        return
+    }
+    
+    ; Validate priority (1-10 range)
+    if priority = "" || !IsNumber(priority) || Integer(priority) < 1 || Integer(priority) > 10 {
         priority := "1"
     }
     
-    ; Validate default quantity
-    if defaultQuantity = "" || !IsNumber(defaultQuantity) || Integer(defaultQuantity) < 1 {
+    ; Validate default quantity (1-999 range)
+    if defaultQuantity = "" || !IsNumber(defaultQuantity) || Integer(defaultQuantity) < 1 || Integer(defaultQuantity) > 999 {
         defaultQuantity := "1"
     }
     
@@ -616,6 +648,9 @@ AddOnlyClickHandler(gui) {
     WriteStatus("COMPLETED")
     WaitingForUser := false  ; End the wait state
     gui.Destroy()
+    
+    ; Show confirmation
+    MsgBox("Item '" . description . "' has been sent to Ruby for processing!", "Item Added", "OK")
 }
 
 CancelItemClickHandler(gui) {

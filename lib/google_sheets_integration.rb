@@ -274,24 +274,8 @@ module GoogleSheetsIntegration
           synced_count += 1
         end
         
-        # Record purchase history if last_purchased date exists
-        if !item[:last_purchased].empty? && item[:last_purchased] != 'last purchased'
-          begin
-            purchase_date = Date.parse(item[:last_purchased])
-            
-            # Check if this purchase already exists
-            existing_purchases = database.get_purchase_history(prod_id, limit: 5)
-            unless existing_purchases.any? { |p| p[:purchase_date] == purchase_date }
-              database.record_purchase(
-                prod_id: prod_id,
-                quantity: item[:quantity] || 1,
-                purchase_date: purchase_date
-              )
-            end
-          rescue Date::Error
-            # Skip invalid dates
-          end
-        end
+        # Note: Last Purchased column is now display-only and not used to create purchase records
+        # Purchase records are only created by actual purchase transactions
       end
       
       puts "✅ Sync complete: #{synced_count} new items, #{updated_count} updated, #{deleted_count} deleted"
