@@ -1,11 +1,15 @@
 # Walmart Grocery Automation System - Additional Instructions
 
 ## Current System State
-- The Walmart grocery automation system is fully functional and working
-- AutoHotkey script captures URLs for new items regardless of purchase status
-- Ruby backend automatically starts/manages AutoHotkey lifecycle 
-- Purchase tracking is implemented with price/quantity capture
-- Git repository is set up but not yet pushed to GitHub (needs repo creation first)
+- ✅ **FULLY WORKING**: Walmart grocery automation system is stable and production-ready
+- ✅ **Ctrl+Shift+A item addition**: Works reliably, items properly saved to database
+- ✅ **Persistent status window**: Visible, styled status display with proper positioning
+- ✅ **No premature syncing**: Google Sheets sync only happens after user finishes session
+- ✅ **Infinite dialog timeouts**: Can leave purchase dialogs open indefinitely
+- ✅ **Crash detection**: Ruby automatically signals AHK to close on any exit scenario
+- ✅ **Two-section sheet format**: Product list + Shopping list with proper handling
+- ✅ **Quit signal handling**: Ruby properly exits when user presses Ctrl+Shift+Q
+- Git repository committed and ready (local commits ahead of remote)
 
 ## Key Technical Details
 - Uses text file communication between Ruby and AutoHotkey (keep it simple!)
@@ -26,18 +30,28 @@
 - Fixed duplicate numbering in multiple choice selection lists
 - Streamlined item processing flow with proper wait states
 
-## Usage Instructions
-1. Run `ruby grocery_bot.rb` (automatically starts AutoHotkey)
-2. Open browser to walmart.com
-3. Press Ctrl+Shift+R when ready to start
-4. For each item, automation will:
+## Current Usage Instructions
+1. **Setup**: Run `ruby grocery_bot.rb` (automatically starts AutoHotkey with persistent status window)
+2. **Browser**: Open browser to walmart.com, navigate to any page
+3. **Start**: Press Ctrl+Shift+R when ready to begin automation
+4. **Shopping List Processing**: System processes items from Google Sheets shopping list section:
    - **Known items**: Navigate directly → Show purchase dialog (price & quantity)
-   - **Multiple matches**: Show selection dialog → Navigate to choice → Show purchase dialog
+   - **Multiple matches**: Show selection dialog → Navigate to choice → Show purchase dialog  
    - **New items**: Search → Wait for manual navigation → Use Ctrl+Shift+A to add or Ctrl+Shift+R to skip
-5. Purchase dialog has three options:
-   - Enter price & quantity → Records purchase
-   - Leave price blank → Skips purchase (saves URL for new items)
+5. **Purchase Dialogs**: Can be left open indefinitely (no timeouts):
+   - Enter price & quantity → Records purchase and marks item complete
+   - Leave price blank → Skips purchase but saves item data
    - Cancel → Same as skip
+6. **Manual Item Addition**: After shopping list completes, use Ctrl+Shift+A anytime to:
+   - Add new products to database (with optional purchase recording)
+   - Record purchases for existing products (leave description blank)
+7. **Completion**: Press Ctrl+Shift+Q to quit → Final Google Sheets sync → Clean exit
+
+**Key Features**:
+- ✅ **No time pressure**: Dialogs wait indefinitely for your input
+- ✅ **Persistent status**: Always shows what's available (Ctrl+Shift+A, Ctrl+Shift+Q)
+- ✅ **Flexible workflow**: Mix automated shopping with manual additions
+- ✅ **Crash safe**: System handles crashes gracefully, no orphaned processes
 
 ## Browser Compatibility
 - System works with any browser setup (tested with Edge "Baseline" group)
@@ -60,23 +74,59 @@
 - `.env` - Database credentials and Google Sheets ID
 - `google_credentials.json` - Google API service account key
 
-## Recent Technical Fixes (August 2025)
+## Major Technical Fixes (August 2025)
 
-### Race Condition Fix
-- **Issue**: File-based IPC had race condition where Ruby read stale "COMPLETED" status from previous commands
-- **Root Cause**: Status and response files weren't deleted after reading, causing timing conflicts
-- **Solution**: Immediate file deletion after reading in `check_status()` and `read_response()` with 0.1s delays
-- **Status**: ✅ FIXED - All commands now working correctly
+### Ctrl+Shift+A Item Addition - RESOLVED ✅
+- **Issue**: Items added via Ctrl+Shift+A dialog weren't being saved to database
+- **Root Cause**: Logic flaw where Ruby cleared response files as "old" instead of processing them
+- **Solution**: Modified response processing to handle existing files properly; restructured monitoring loop
+- **Status**: ✅ FIXED - Items now reliably saved to database
 
-### UI/UX Improvements  
-- **Duplicate Numbers**: Fixed duplicate numbering in multiple choice dialogs (Ruby was adding numbers, AHK was adding them again)
-- **Dialog Simplification**: Combined separate price and quantity dialogs into single purchase dialog
-- **Flow Optimization**: Eliminated surprise dialogs appearing after search; proper wait states only when manual navigation needed
-- **Response Handling**: Fixed add item dialog responses not being processed; wait states now properly end after dialogs
+### Quit Signal Handling - RESOLVED ✅
+- **Issue**: Ruby would not exit when user pressed Ctrl+Shift+Q, continuing to run with "AHK STATUS UNKNOWN"
+- **Root Cause**: Quit signal ("quit") was being passed to item processing instead of exit logic
+- **Solution**: Added proper quit signal detection before item processing in `wait_for_ahk_shutdown`
+- **Status**: ✅ FIXED - Ruby cleanly exits when user presses Ctrl+Shift+Q
 
-### File Structure Updates
-- **Files Renamed**: `grocery_automation_hotkey.ahk` → `grocery_automation.ahk` 
-- **Function Separation**: Added `GetCurrentURLSilent()` to prevent URL capture from interfering with dialog responses
+### Persistent Status Display ✅
+- **Implementation**: Replaced tooltips with styled GUI window for better visibility
+- **Features**: Dark themed, always-on-top, positioned in top-right with proper margins
+- **Messages**: Shows current state (ready/processing/complete) with available hotkeys
+- **Benefits**: Much more visible than tooltips, truly persistent, professional appearance
+
+### Dialog Timeout Elimination ✅
+- **Change**: Removed all timeouts from user dialogs (purchase, add item, etc.)
+- **Benefit**: Can leave dialogs open indefinitely - come back tomorrow and continue
+- **Implementation**: Modified `send_command` to use `timeout: nil` for dialog commands
+- **User Experience**: No rush to enter data, supports leisurely shopping pace
+
+### Sheet Sync Timing Fix ✅  
+- **Issue**: Google Sheets sync happened immediately after processing, before user finished adding items
+- **Solution**: Moved sync to happen only when user quits (after `wait_for_ahk_shutdown`)
+- **Benefit**: Can add multiple items via Ctrl+Shift+A before final sync occurs
+
+### Crash Detection & Cleanup ✅
+- **Implementation**: Added `TERMINATE` command and comprehensive cleanup handlers
+- **Coverage**: Normal exit, Ctrl+C, crashes, exceptions - all scenarios signal AHK to close
+- **Mechanism**: Ruby sends `TERMINATE` command, AHK gracefully shuts down
+- **Result**: No orphaned AutoHotkey processes after Ruby crashes
+
+### Two-Section Sheet Format ✅
+- **Structure**: Product list (database management) + Shopping list (actual ordering)
+- **Processing**: Only shopping list items processed for ordering, product list ignored
+- **Sync**: Complete sheet rewrite with updated product list + shopping list with purchase marks
+- **Quantity Logic**: Blank = 1 (order), explicit 0 = skip, any number = order that amount
+
+### Item Matching Enhancement ✅
+- **Improvement**: Search algorithm now includes modifier field in matching
+- **Example**: "Chopped walnuts" matches "walnuts" + modifier "chopped"
+- **Implementation**: Calculates scores for both description-only and description+modifier
+- **Benefit**: Much better matching for natural shopping list entries
+
+### Race Condition Resolution ✅
+- **Original Issue**: File-based IPC had timing conflicts with response processing
+- **Final Solution**: Proper response file processing instead of clearing, better monitoring loop
+- **Status**: All file communication now reliable and race-condition free
 
 ## Next Steps if Continued
 - Push git repository to GitHub (need to create `shopping_ahk` repo first)
