@@ -96,3 +96,14 @@
 - AutoHotkey lifecycle managed automatically (no manual cleanup needed)
 - Text file communication is intentionally simple and reliable
 - System builds database of known products over time regardless of purchases
+
+# NEW DATA SHEET FLOW
+- The sheet will have two sections: product-list and shopping-list. The sheet begins with the product list.  The beginning of the shopping list will be denoted by "Shopping List" in the first column (Purchased column)
+- The product list is unchanged except that the quantity should now be ignored. The list is only used for managing the items table.
+- The subsequent Shopping List section will not sync with the database but needs to be remembered for rewriting to the sheet. The app will process the items in the shopping list exactly as it has previously done: find the item, navigate to it, open the AHK dialog etc.
+- The existing logic I think is thus unchanged except: when in product list, do not test for purchase using the quantity, so will never navigate to thoses pages; when in shopping list, remember the row contents for rewriting. 
+- Sync to Sheet:
+  1. Clear the sheet
+  2. Rewrite the sorted item (product) table which may now be longer than the original
+  3. Write a blank line, then the "Shopping list" delimiter in col 1, then the items in the shopping list, which should now have checkmarks for items purchased.
+  4. The overall effect is that the updated sheet contains the new, sorted item list followed by the shopping list with purchased items marked.

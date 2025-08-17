@@ -31,7 +31,7 @@ class WalmartGroceryAssistant
 
     if grocery_items.empty?
       puts "No items found to order."
-      @ahk.show_message("No items found to order.\n\nPlease set quantity > 0 for items in your Google Sheet.")
+      @ahk.show_message("No items found to order.\n\nAdd items to your Google Sheet (blank quantity = 1, explicit 0 = don't order).")
     else
       puts "🛍️ Found #{grocery_items.length} items to order"
       puts '🚀 Starting shopping automation...'
@@ -195,15 +195,22 @@ class WalmartGroceryAssistant
 
   def load_items_to_order
     if @sheets_sync
-      all_items = @sheets_sync.get_grocery_list
-
-      # Filter for items with quantity > 0
-      items_to_order = all_items.select { |item| item[:quantity] > 0 }
+      sheet_data = @sheets_sync.get_grocery_list
+      
+      # Process only shopping list items with quantity != 0 AND no purchase mark
+      shopping_items = sheet_data[:shopping_list]
+      items_to_order = shopping_items.select do |item| 
+        item[:quantity] != 0 && (item[:purchased].nil? || item[:purchased].strip.empty?)
+      end
+      
+      # Store shopping list for later rewriting (keep all items, not just ones to order)
+      @shopping_list_data = shopping_items
 
       # Return just the item names for processing
       items_to_order.map { |item| item[:item] }
     else
       # Fallback if sheets not available
+      @shopping_list_data = []
       []
     end
   end
@@ -211,7 +218,9 @@ class WalmartGroceryAssistant
   def sync_database_to_sheets
     return unless @sheets_sync
 
-    result = @sheets_sync.sync_from_database(@db)
+    # Pass shopping list data to preserve it during sheet rewrite
+    shopping_data = @shopping_list_data || []
+    result = @sheets_sync.sync_from_database(@db, shopping_data)
     # Sync happens silently in background
   end
 
@@ -275,10 +284,23 @@ class WalmartGroceryAssistant
     all_items = @db.get_all_items_by_priority
 
     all_items.each do |db_item|
-      match_score = calculate_match_score(item_name, db_item[:description])
+      # Calculate match score against description only
+      desc_score = calculate_match_score(item_name, db_item[:description])
+      
+      # Calculate match score against description + modifier combined
+      combined_text = [db_item[:description], db_item[:modifier]].compact.join(' ')
+      combined_score = calculate_match_score(item_name, combined_text)
+      
+      # Use the higher of the two scores
+      match_score = [desc_score, combined_score].max
       next if match_score == 0
 
-      match_type = item_name.downcase == db_item[:description].downcase ? :exact : :fuzzy
+      # Check for exact matches (either description alone or with modifier)
+      item_lower = item_name.downcase.strip
+      desc_lower = db_item[:description].downcase.strip
+      combined_lower = combined_text.downcase.strip
+      
+      match_type = (item_lower == desc_lower || item_lower == combined_lower) ? :exact : :fuzzy
 
       matches << {
         item: db_item,
@@ -861,14 +883,27 @@ class WalmartGroceryAssistant
       price_cents: price_cents
     )
 
-    # Mark item as completed in Google Sheets
-    @sheets_sync.mark_item_completed(item[:description]) if @sheets_sync
+    # Mark item as completed in shopping list data
+    mark_shopping_item_completed(item[:description])
 
     if price_cents
       price_display = "$#{format('%.2f', price_cents / 100.0)}"
       puts "📊 Recorded purchase: #{quantity}x #{item[:description]} @ #{price_display}".colorize(:blue)
     else
       puts "📊 Recorded purchase: #{quantity}x #{item[:description]} (no price)".colorize(:blue)
+    end
+  end
+
+  def mark_shopping_item_completed(item_description)
+    return unless @shopping_list_data
+
+    # Find and mark the shopping list item as completed
+    @shopping_list_data.each do |shopping_item|
+      if shopping_item[:item].downcase == item_description.downcase
+        shopping_item[:purchased] = '✓'
+        puts "✅ Marked shopping item completed: #{item_description}"
+        break
+      end
     end
   end
 

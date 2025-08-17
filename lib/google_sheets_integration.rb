@@ -68,13 +68,24 @@ module GoogleSheetsIntegration
       nil
     end
     
+    def parse_quantity(quantity_cell)
+      # Handle quantity parsing with new logic:
+      # - Blank/empty = 1 (want to order 1 unit)
+      # - Explicit 0 = 0 (don't order)  
+      # - Any other number = that number
+      return 1 if quantity_cell.nil? || quantity_cell.strip.empty?
+      
+      parsed = quantity_cell.strip.to_i
+      parsed
+    end
+    
     def get_grocery_list
       # Get all data from sheet
       range = "#{sheet_name}!A:Z"  # Use wider range to handle any number of columns
       
       response = @service.get_spreadsheet_values(SHEET_ID, range)
       rows = response.values || []
-      return [] if rows.empty?
+      return { product_list: [], shopping_list: [] } if rows.empty?
       
       # Get column mapping from headers
       header_map = get_column_headers
@@ -89,27 +100,46 @@ module GoogleSheetsIntegration
       itemno_col = find_column_index(header_map, 'itemno', 'item no', 'itemid', 'item id', 'prodid', 'product id', 'id')
       url_col = find_column_index(header_map, 'url', 'link', 'website')
       
-      grocery_items = []
-      # Skip header row
-      rows[1..-1]&.each do |row|
-        # Skip completely empty rows or rows without item name
+      product_list = []
+      shopping_list = []
+      in_shopping_section = false
+      
+      # Skip header row and process sections
+      rows[1..-1]&.each_with_index do |row, index|
+        # Skip completely empty rows
         next if row.nil? || row.empty? 
         next if row.all? { |cell| cell.nil? || cell.to_s.strip.empty? }
+        
+        # Check if this is the "Shopping List" delimiter
+        first_col_text = purchased_col ? (row[purchased_col]&.strip || '') : ''
+        if first_col_text.downcase.include?('shopping list')
+          in_shopping_section = true
+          next
+        end
+        
+        # Skip rows without item names
         next if item_col && (row[item_col].nil? || row[item_col].to_s.strip.empty?)
         
-        grocery_items << {
+        item_data = {
           purchased: purchased_col ? (row[purchased_col]&.strip || '') : '',
           item: item_col ? (row[item_col]&.strip || '') : '',
           modifier: modifier_col ? (row[modifier_col]&.strip || '') : '',
           priority: priority_col && row[priority_col] && !row[priority_col].strip.empty? ? row[priority_col].strip.to_i : 1,
-          quantity: quantity_col ? (row[quantity_col]&.strip&.to_i || 1) : 1,
+          quantity: quantity_col ? parse_quantity(row[quantity_col]) : 1,
           last_purchased: last_purchased_col ? (row[last_purchased_col]&.strip || '') : '',
           itemno: itemno_col ? (row[itemno_col]&.strip || '') : '',
-          url: url_col ? (row[url_col]&.strip || '') : ''
+          url: url_col ? (row[url_col]&.strip || '') : '',
+          original_row_index: index + 2  # +2 because we skipped header and arrays are 0-indexed
         }
+        
+        if in_shopping_section
+          shopping_list << item_data
+        else
+          product_list << item_data
+        end
       end
       
-      grocery_items
+      { product_list: product_list, shopping_list: shopping_list }
     end
     
     def update_item_url(item_name, url)
@@ -207,7 +237,9 @@ module GoogleSheetsIntegration
     def sync_to_database(database)
       puts "📊 Syncing Google Sheets data to database..."
       
-      items = get_grocery_list
+      sheet_data = get_grocery_list
+      # Only sync product list to database, ignore shopping list
+      items = sheet_data[:product_list]
       synced_count = 0
       updated_count = 0
       deleted_count = 0
@@ -282,93 +314,81 @@ module GoogleSheetsIntegration
       { new: synced_count, updated: updated_count, deleted: deleted_count }
     end
 
-    def sync_from_database(database)
-      puts "📤 Syncing database items back to Google Sheets..."
+    def sync_from_database(database, shopping_list_data = [])
+      puts "📤 Rewriting entire Google Sheets with updated data..."
       
-      # Get all items from database
+      # Get all items from database (sorted by priority)
       db_items = database.get_all_items_by_priority
       
-      # Get current sheet data
-      current_items = get_grocery_list
-      current_items_map = current_items.map { |item| [item[:item].downcase, item] }.to_h
+      # Build complete sheet data
+      all_rows = []
       
-      # Check if sheet needs headers first
-      range = "#{sheet_name}!A:Z"
-      response = @service.get_spreadsheet_values(SHEET_ID, range)
-      existing_rows = response.values || []
+      # 1. Headers
+      headers = ['Purchased', 'Item Name', 'Modifier', 'Priority', 'Qty', 'Last Purchased', 'ItemNo', 'URL']
+      all_rows << headers
       
-      # If sheet is completely empty, add headers first
-      if existing_rows.empty?
-        headers = ['Purchased', 'Item Name', 'Modifier', 'Priority', 'Qty', 'Last Purchased', 'ItemNo', 'URL']
-        header_range = "#{sheet_name}!A1:H1"
-        header_value_range = Google::Apis::SheetsV4::ValueRange.new(
-          range: header_range,
-          values: [headers]
-        )
-        
-        begin
-          @service.update_spreadsheet_value(
-            SHEET_ID,
-            header_range,
-            header_value_range,
-            value_input_option: 'RAW'
-          )
-          existing_rows = [headers]  # Update our local copy
-        rescue => e
-          puts "❌ Error creating headers: #{e.message}"
-        end
-      end
-      
-      new_items = []
-      
+      # 2. Product list section
       db_items.each do |db_item|
-        item_name = db_item[:description]
-        
-        # Skip if item already exists in sheet
-        next if current_items_map.key?(item_name.downcase)
-        
         # Get most recent purchase for this item
         recent_purchase = database.get_purchase_history(db_item[:prod_id], limit: 1).first
         last_purchased = recent_purchase ? recent_purchase[:purchase_date].to_s : ''
         
         # Build row with fixed column order: Purchased, Item Name, Modifier, Priority, Qty, Last Purchased, ItemNo, URL
         # Leave priority blank if it's 1 (highest priority default)
-        # Leave quantity blank instead of showing 0
+        # Leave quantity blank in product list (not used for ordering)
         priority_display = (db_item[:priority] == 1) ? '' : db_item[:priority].to_s
-        row = ['', item_name, db_item[:modifier] || '', priority_display, '', last_purchased, db_item[:prod_id], db_item[:url]]
+        row = ['', db_item[:description], db_item[:modifier] || '', priority_display, '', last_purchased, db_item[:prod_id], db_item[:url]]
         
-        new_items << row
+        all_rows << row
       end
       
-      if new_items.empty?
-        puts "ℹ️  No new items to add to sheet"
-        return { added: 0 }
+      # 3. Blank line separator
+      all_rows << ['', '', '', '', '', '', '', '']
+      
+      # 4. Shopping List delimiter
+      all_rows << ['Shopping List', '', '', '', '', '', '', '']
+      
+      # 5. Shopping list items (preserve existing purchase marks)
+      shopping_list_data.each do |shopping_item|
+        # Preserve any existing purchase mark (checkmark, x, etc.)
+        purchased_mark = shopping_item[:purchased] || ''
+        
+        row = [purchased_mark, shopping_item[:item], shopping_item[:modifier] || '', 
+               shopping_item[:priority] == 1 ? '' : shopping_item[:priority].to_s, 
+               shopping_item[:quantity].to_s, shopping_item[:last_purchased] || '', 
+               shopping_item[:itemno] || '', shopping_item[:url] || '']
+        
+        all_rows << row
       end
       
-      last_row = existing_rows.length + 1
-      
-      # Append new items (8 columns: A to H)
-      new_range = "#{sheet_name}!A#{last_row}:H#{last_row + new_items.length - 1}"
-      value_range = Google::Apis::SheetsV4::ValueRange.new(
-        range: new_range,
-        values: new_items
-      )
-      
+      # Clear entire sheet and rewrite
       begin
+        # Clear the sheet
+        clear_range = "#{sheet_name}!A:Z"
+        @service.clear_values(SHEET_ID, clear_range)
         
-        @service.update_spreadsheet_value(
-          SHEET_ID,
-          new_range,
-          value_range,
-          value_input_option: 'RAW'
-        )
+        # Write all data at once
+        if all_rows.length > 1  # More than just headers
+          write_range = "#{sheet_name}!A1:H#{all_rows.length}"
+          value_range = Google::Apis::SheetsV4::ValueRange.new(
+            range: write_range,
+            values: all_rows
+          )
+          
+          @service.update_spreadsheet_value(
+            SHEET_ID,
+            write_range,
+            value_range,
+            value_input_option: 'RAW'
+          )
+        end
         
-        puts "✅ Added #{new_items.length} new items to Google Sheets"
-        { added: new_items.length }
+        puts "✅ Rewrote entire sheet: #{db_items.length} products, #{shopping_list_data.length} shopping items"
+        { products: db_items.length, shopping_items: shopping_list_data.length }
       rescue => e
-        puts "❌ Error writing to Google Sheets: #{e.message}"
+        puts "❌ Error rewriting Google Sheets: #{e.message}"
         puts "🔍 Debug: #{e.class}: #{e.backtrace.first}"
-        { added: 0, error: e.message }
+        { products: 0, shopping_items: 0, error: e.message }
       end
     end
   end

@@ -24,6 +24,7 @@ just_switch_browser.ahk
 *.csv
 *~
 walmart_backup_*
+extracted_walmart_*
 
 # Ruby
 .bundle/
