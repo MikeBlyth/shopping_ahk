@@ -3,6 +3,7 @@ require 'csv'
 require 'json'
 require 'colorize'
 require 'dotenv/load'
+require 'set'
 require_relative 'lib/google_sheets_integration'
 require 'debug' # Add the debugger
 require_relative 'lib/database'
@@ -32,10 +33,28 @@ class WalmartGroceryAssistant
     if grocery_items.empty?
       puts 'No items found to order.'
     else
-      puts "🛍️ Found #{grocery_items.length} items to order"
+      # Remove duplicates (case-insensitive) while preserving order
+      original_count = grocery_items.length
+      unique_items = []
+      seen_items = Set.new
+      
+      grocery_items.each do |item|
+        item_key = item.downcase.strip
+        unless seen_items.include?(item_key)
+          unique_items << item
+          seen_items.add(item_key)
+        end
+      end
+      
+      if unique_items.length < original_count
+        duplicates_removed = original_count - unique_items.length
+        puts "🔄 Removed #{duplicates_removed} duplicate item(s)"
+      end
+      
+      puts "🛍️ Processing #{unique_items.length} unique items"
       puts '🚀 Starting shopping automation...'
 
-      process_grocery_list(grocery_items)
+      process_grocery_list(unique_items)
 
       @ahk.show_message("Shopping complete!\n\nReview your cart and proceed to checkout when ready.")
     end
