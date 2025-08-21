@@ -16,6 +16,11 @@ minimal_test.ahk
 debug_*
 show_all_windows.ahk
 just_switch_browser.ahk
+grocery_bot_dev.rb
+grocery_automation_dev.ahk
+akh_bridge_dev.rb
+CLAUDE_dev.md
+
 
 # Backup and temporary files
 *.bak

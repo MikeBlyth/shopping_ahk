@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(ruby:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(grep:*)"
     ],
     "defaultMode": "acceptEdits"
   }

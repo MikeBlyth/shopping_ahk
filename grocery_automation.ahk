@@ -45,6 +45,9 @@ MsgBox("AutoHotkey ready!`n`nInstructions:`n1. Start ruby grocery_bot.rb`n2. Ope
             ExitApp
         }
         
+        ; If we're in a search state, respond with skip
+        WriteResponse("skip")
+        
         MsgBox("Ready signal received!", "Test Script", "OK")
         
         ; Update status for shopping mode after dialog closes
@@ -109,8 +112,8 @@ ProcessCommand(command) {
         case "WAIT_FOR_CONTINUE":
             FileAppend("MATCHED WAIT_FOR_CONTINUE`n", "command_debug.txt")
             WaitForContinue()
-        case "SESSION_COMPLETE":
-            FileAppend("MATCHED SESSION_COMPLETE`n", "command_debug.txt")
+        case "LIST_COMPLETE":
+            FileAppend("MATCHED LIST_COMPLETE`n", "command_debug.txt")
             ProcessSessionComplete()
         case "ADD_ITEM_DIALOG":
             FileAppend("MATCHED ADD_ITEM_DIALOG`n", "command_debug.txt")
@@ -159,6 +162,9 @@ OpenURL(url) {
 }
 
 SearchWalmart(searchTerm) {
+    ; Update status to show what user should do
+    ShowPersistentStatus("Searching for " . searchTerm . ". Navigate to product, then Ctrl+Shift+A to add or Ctrl+Shift+R to skip.")
+    
     ; Build search URL
     searchURL := "https://www.walmart.com/search?q=" . UriEncode(searchTerm)
     
@@ -171,11 +177,11 @@ SearchWalmart(searchTerm) {
     Sleep(100)
     Send("{Enter}")
     
-    ; Wait for search results
+    ; Wait for search results to load
     Sleep(3000)
     
-    ; Don't wait for user here - let the next command (SHOW_ITEM_PROMPT) handle user interaction
-    WriteStatus("COMPLETED")
+    ; Don't send anything to Ruby - just wait for user action
+    ; Ctrl+Shift+A or Ctrl+Shift+R will complete the command
 }
 
 GetCurrentURL() {
@@ -264,8 +270,7 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     
     ; Buttons
     addButton := purchaseGui.Add("Button", "xm y+20 w100 h30", "Record Purchase")
-    skipButton := purchaseGui.Add("Button", "x+10 w100 h30", "Skip Item")
-    cancelButton := purchaseGui.Add("Button", "x+10 w100 h30", "Cancel")
+    skipButton := purchaseGui.Add("Button", "x+10 w100 h30", "Skip/Cancel")
     
     ; Store references for event handlers
     purchaseGui.priceEdit := priceEdit
@@ -275,7 +280,6 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     ; Button event handlers
     addButton.OnEvent("Click", (*) => PurchaseClickHandler(purchaseGui))
     skipButton.OnEvent("Click", (*) => SkipClickHandler(purchaseGui))
-    cancelButton.OnEvent("Click", (*) => CancelPurchaseClickHandler(purchaseGui))
     
     ; Show dialog
     purchaseGui.Show()
@@ -298,7 +302,7 @@ PurchaseClickHandler(gui) {
         if !gui.is_known {
             GetCurrentURLAndRespond("save_url_only")
         } else {
-            WriteResponse("continue")
+            WriteResponse("skip")
         }
     } else {
         ; Valid price entered - record purchase
@@ -324,7 +328,7 @@ SkipClickHandler(gui) {
     if !gui.is_known {
         GetCurrentURLAndRespond("save_url_only")
     } else {
-        WriteResponse("continue")
+        WriteResponse("skip")
     }
     
     WriteStatus("COMPLETED")
@@ -336,7 +340,7 @@ CancelPurchaseClickHandler(gui) {
     if !gui.is_known {
         GetCurrentURLAndRespond("save_url_only")
     } else {
-        WriteResponse("continue")
+        WriteResponse("skip")
     }
     
     WriteStatus("COMPLETED")
@@ -393,14 +397,14 @@ ShowMultipleChoice(param) {
                 if choice_num >= 1 && choice_num <= options.Length {
                     WriteResponse("choice|" . choice_num)
                 } else {
-                    WriteResponse("cancelled")
+                    WriteResponse("skip")
                 }
             } catch {
-                WriteResponse("cancelled")
+                WriteResponse("skip")
             }
         }
     } else {
-        WriteResponse("cancelled")
+        WriteResponse("skip")
     }
     
     WriteStatus("COMPLETED")
@@ -412,7 +416,7 @@ GetPriceInput() {
     if result.Result = "OK" && result.Value != "" {
         WriteResponse("price|" . result.Value)
     } else {
-        WriteResponse("cancelled")
+        WriteResponse("skip")
     }
     
     WriteStatus("COMPLETED")
@@ -584,7 +588,7 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     ; Buttons
     addButton := addItemGui.Add("Button", "xm y+15 w120 h30", "Add & Purchase")
     addOnlyButton := addItemGui.Add("Button", "x+10 w100 h30", "Add Only")
-    cancelButton := addItemGui.Add("Button", "x+10 w100 h30", "Cancel")
+    skipButton := addItemGui.Add("Button", "x+10 w100 h30", "Skip/Cancel")
     
     ; Make variables accessible to event handlers
     addItemGui.descriptionEdit := descriptionEdit
@@ -598,7 +602,7 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     ; Button event handlers
     addButton.OnEvent("Click", (*) => AddAndPurchaseClickHandler(addItemGui))
     addOnlyButton.OnEvent("Click", (*) => AddOnlyClickHandler(addItemGui))
-    cancelButton.OnEvent("Click", (*) => CancelItemClickHandler(addItemGui))
+    skipButton.OnEvent("Click", (*) => CancelItemClickHandler(addItemGui))
     
     ; Show dialog
     addItemGui.Show()
@@ -715,7 +719,7 @@ AddOnlyClickHandler(gui) {
 
 CancelItemClickHandler(gui) {
     global WaitingForUser
-    WriteResponse("cancelled")
+    WriteResponse("skip")
     WriteStatus("COMPLETED")
     WaitingForUser := false  ; End the wait state
     gui.Destroy()

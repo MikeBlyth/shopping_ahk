@@ -74,6 +74,41 @@
 - `.env` - Database credentials and Google Sheets ID
 - `google_credentials.json` - Google API service account key
 
+## Ruby's Item Sending Logic
+
+**Ruby sends to AutoHotkey:**
+
+1. **Single Item**: When there's one exact match or Ruby picks the highest priority from multiple exact matches
+   - Format: Normal single item flow via `handle_user_interaction`
+   - Ruby navigates to the item, AHK shows purchase dialog
+
+2. **Multiple Fuzzy Matches**: When search term matches multiple items but none exactly  
+   - Format: Multiple choice dialog via `handle_multiple_matches`
+   - User chooses from numbered list or selects "Search for new item"
+   - Ruby processes the user's choice
+
+3. **No Matches**: When item not found in database
+   - Format: Search mode - Ruby searches Walmart, waits for manual navigation
+   - User navigates to desired item, uses Ctrl+Shift+A to add it
+
+**Key Principle**: Ruby always sends the BEST single option to AutoHotkey. For multiple exact matches, Ruby automatically picks the highest priority item (lowest priority number) rather than asking the user to choose between identical items.
+
+### Simple Architecture Flow
+
+**Ruby's Main Processing Loop** (KEEP IT SIMPLE):
+```
+For each item in shopping list:
+  1. Send command to AutoHotkey 
+  2. Monitor AutoHotkey stream for response
+  3. If purchase was made → record in database
+  4. Continue to next item
+
+After shopping list complete:
+  Monitor stream for user-initiated add/purchase commands
+```
+
+**Critical Rule**: Ruby should NEVER send `WAIT_FOR_USER` commands during main shopping list processing. Ruby only orchestrates - AutoHotkey handles all user interaction, alternatives, substitutions, and dialog flows.
+
 ## Major Technical Fixes (August 2025)
 
 ### Ctrl+Shift+A Item Addition - RESOLVED ✅

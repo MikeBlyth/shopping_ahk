@@ -14,19 +14,23 @@ class AhkBridge
     wait_for_completion(timeout)
   end
 
+  def send_command_and_wait(command, timeout: nil)
+    send_command(command, timeout: timeout)
+    read_response
+  end
+
   def open_url(url)
     puts "🌐 Opening URL via AHK: #{url}".colorize(:blue)
-    send_command("OPEN_URL|#{url}", timeout: 30)  # 30 second timeout for navigation
+    send_command("OPEN_URL|#{url}", timeout: 30) # 30 second timeout for navigation
   end
 
   def search_walmart(search_term)
     puts "🔍 Searching Walmart via AHK: #{search_term}".colorize(:blue)
-    send_command("SEARCH|#{search_term}", timeout: 30)  # 30 second timeout for search
+    send_command_and_wait("SEARCH|#{search_term}", timeout: nil) # No timeout for user interaction
   end
 
   def get_current_url
-    send_command('GET_URL')
-    read_response
+    send_command_and_wait('GET_URL')
   end
 
   def wait_for_user
@@ -34,8 +38,7 @@ class AhkBridge
   end
 
   def show_add_item_dialog(suggested_name = '')
-    send_command("ADD_ITEM_DIALOG|#{suggested_name}")
-    read_response
+    send_command_and_wait("ADD_ITEM_DIALOG|#{suggested_name}")
   end
 
   def show_item_prompt(item_name, is_known: false, url: '', description: '', item_description: '', default_quantity: 1)
@@ -43,8 +46,7 @@ class AhkBridge
     puts '🎭 About to send SHOW_ITEM_PROMPT command...'.colorize(:yellow)
 
     begin
-      send_command("SHOW_ITEM_PROMPT|#{params}")
-      response = read_response
+      response = send_command_and_wait("SHOW_ITEM_PROMPT|#{params}")
       puts "🎭 SHOW_ITEM_PROMPT response: '#{response}'".colorize(:yellow)
       response
     rescue StandardError => e
@@ -54,13 +56,11 @@ class AhkBridge
   end
 
   def show_message(message)
-    send_command("SHOW_MESSAGE|#{message}")  # No timeout - can wait indefinitely
-    read_response
+    send_command_and_wait("SHOW_MESSAGE|#{message}") # No timeout - can wait indefinitely
   end
 
   def get_price_input
-    send_command('GET_PRICE_INPUT')
-    response = read_response
+    response = send_command_and_wait('GET_PRICE_INPUT')
 
     if response.start_with?('price|')
       price_str = response.split('|', 2)[1]
@@ -79,9 +79,7 @@ class AhkBridge
   def show_multiple_choice(title:, options:, allow_skip: true)
     # Format: SHOW_MULTIPLE_CHOICE|title|allow_skip|option1|option2|...
     params = [title, allow_skip.to_s] + options
-    send_command("SHOW_MULTIPLE_CHOICE|#{params.join('|')}")
-
-    response = read_response
+    response = send_command_and_wait("SHOW_MULTIPLE_CHOICE|#{params.join('|')}")
     if response.start_with?('choice|')
       choice_str = response.split('|', 2)[1]
       begin
@@ -96,16 +94,14 @@ class AhkBridge
     end
   end
 
-  def session_complete
-    send_command('SESSION_COMPLETE')
-    read_response
+  def LIST_COMPLETE
+    send_command_and_wait('LIST_COMPLETE')
   end
-
 
   def cleanup
     # Gentle cleanup - just reset session but don't terminate AHK
-    send_command('SESSION_COMPLETE') if File.exist?(COMMAND_FILE)
-    
+    send_command('LIST_COMPLETE') if File.exist?(COMMAND_FILE)
+
     # Clean up communication files but leave AHK running
     [COMMAND_FILE, RESPONSE_FILE].each do |file|
       File.delete(file) if File.exist?(file)
@@ -116,12 +112,12 @@ class AhkBridge
     # Signal AHK to terminate gracefully
     begin
       File.write(COMMAND_FILE, 'TERMINATE')
-      puts "📤 Sent termination signal to AutoHotkey"
+      puts '📤 Sent termination signal to AutoHotkey'
       sleep(1) # Give AHK time to process the command
-    rescue => e
+    rescue StandardError => e
       puts "⚠️ Failed to send termination signal: #{e.message}"
     end
-    
+
     # Clean up files
     [COMMAND_FILE, STATUS_FILE, RESPONSE_FILE].each do |file|
       File.delete(file) if File.exist?(file)
@@ -177,30 +173,30 @@ class AhkBridge
 
   def wait_loop
     loop do
-        status = check_status
-        
-        case status
-        when 'READY'
-          return true
-        when 'COMPLETED'
-          # Wait a moment to ensure AHK has finished writing response
-          sleep(0.1)
-          return true
-        when 'ERROR'
-          response = read_response
-          raise "AHK Error: #{response}"
-        when 'SHUTDOWN'
-          puts '  ℹ️ AutoHotkey script shutting down (user-initiated via Ctrl+Shift+Q)'
-          return true
-        when 'WAITING_FOR_USER'
-          puts '🛑 AHK is waiting for user action...'.colorize(:yellow)
-          # Don't return - keep waiting until user presses Ctrl+Shift+R
-          # The loop will continue and check status again
-        end
+      status = check_status
 
-        sleep(0.5)
+      case status
+      when 'READY'
+        return true
+      when 'COMPLETED'
+        # Wait a moment to ensure AHK has finished writing response
+        sleep(0.1)
+        return true
+      when 'ERROR'
+        response = read_response
+        raise "AHK Error: #{response}"
+      when 'SHUTDOWN'
+        puts '  ℹ️ AutoHotkey script shutting down (user-initiated via Ctrl+Shift+Q)'
+        return true
+      when 'WAITING_FOR_USER'
+        puts '🛑 AHK is waiting for user action...'.colorize(:yellow)
+        # Don't return - keep waiting until user presses Ctrl+Shift+R
+        # The loop will continue and check status again
       end
+
+      sleep(0.5)
+    end
   end
-  rescue Timeout::Error
-    raise "AHK command timed out after #{timeout} seconds"
-  end
+rescue Timeout::Error
+  raise "AHK command timed out after #{timeout} seconds"
+end

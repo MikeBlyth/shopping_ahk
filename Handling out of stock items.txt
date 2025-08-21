@@ -1,0 +1,14 @@
+Handling out of stock items
+
+  - When there are multiple exact matches, Ruby should send them all with the highest priority first. There is nothing else that has to be changed in Ruby except that it needs to tell AHK which of the following variations is in play.
+  - There should be one main method for AHK to handle a requested item. It will respond to three possible variations:
+    1. A single item to find -> user can purchase or not. This is already working fine.
+    2. Multiple partial matches -> user can choose which to find. This is already working fine.
+    3. Multiple exact matches in priority order. This is new.
+
+AHK behavior for case 3 above:
+  1. Navigate to the first item
+  2. Determine whether item is available (existing behavior)
+  3. If it available, proceed as usual
+  4. ELSE: (a) navigate to the next highest priority item (b) show a temporary notification about out of stock and searching for the next possibility (that box should last 3 seconds, not be blocking, not require ack).
+  5.  Repeat until there are no more items or user has chosen one.
