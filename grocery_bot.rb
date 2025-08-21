@@ -75,6 +75,13 @@ class WalmartGroceryAssistant
   private
 
   def setup_cleanup_handlers
+    # Handle Ctrl+C gracefully without error trace
+    Signal.trap('INT') do
+      puts "\n🛑 Received Ctrl+C. Shutting down gracefully..."
+      cleanup_on_exit
+      exit(0)
+    end
+    
     # at_exit handles ALL exit scenarios: normal exit, exceptions, interrupts, crashes, etc.
     at_exit { cleanup_on_exit }
   end

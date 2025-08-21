@@ -24,34 +24,48 @@ try {
 }
 
 ; Show initial status
-ShowPersistentStatus("Assistant ready - waiting for Ctrl+Shift+R to start shopping list, press Ctrl+Shift+Q to quit")
+ShowPersistentStatus("Assistant ready - processing shopping list, press Ctrl+Shift+Q to quit")
 
-MsgBox("AutoHotkey ready!`n`nInstructions:`n1. Start ruby grocery_bot.rb`n2. Open/switch to your Walmart page`n3. Press Ctrl+Shift+R when ready", "Walmart Assistant", "OK")
+; Create a TopMost dialog
+startupComplete := false
+startupGui := Gui("+AlwaysOnTop", "Walmart Assistant")
+startupGui.SetFont("s10")
+startupGui.Add("Text", "x20 y15 w300", "AutoHotkey ready!")
+startupGui.Add("Text", "x20 y40 w300", "Instructions:")
+startupGui.Add("Text", "x20 y60 w300", "1. Switch to your Walmart browser window")
+startupGui.Add("Text", "x20 y80 w300", "2. Press OK to start automation")
+okButton := startupGui.Add("Button", "x130 y110 w60 h30", "OK")
+okButton.OnEvent("Click", (*) => StartupOKClicked(startupGui))
+startupGui.Show("w340 h160")
 
-; Hotkey to signal readiness
+; Wait for user to click OK
+while !startupComplete {
+    Sleep(100)
+}
+
+; After user presses OK, signal readiness immediately
+UserReady := true
+TargetWindowHandle := WinExist("A")
+
+if !TargetWindowHandle {
+    MsgBox("Could not find an active window handle.", "Error", "OK TopMost")
+    ExitApp
+}
+
+WriteStatus("READY")
+ShowPersistentStatus("Assistant processing shopping list, press Ctrl+Shift+Q to quit")
+
+; Hotkey to continue when waiting for user (mid-process only)
 ^+r::{
-    global UserReady, WaitingForUser, TargetWindowHandle
+    global WaitingForUser
     
     if WaitingForUser {
         WaitingForUser := false
         WriteStatus("READY")
     } else {
-        UserReady := true
-        WriteStatus("READY")
-        TargetWindowHandle := WinExist("A")
-
-        if !TargetWindowHandle {
-            MsgBox("Could not find an active window handle.")
-            ExitApp
-        }
-        
-        ; If we're in a search state, respond with skip
+        ; If we're in a search state, respond with skip and complete command
         WriteResponse("skip")
-        
-        MsgBox("Ready signal received!", "Test Script", "OK")
-        
-        ; Update status for shopping mode after dialog closes
-        ShowPersistentStatus("Assistant processing shopping list, press Ctrl+Shift+Q to quit")
+        WriteStatus("COMPLETED")
     }
 }
 
@@ -749,4 +763,10 @@ ShowPersistentStatus(message) {
     
     ; Make it stay on top but not steal focus
     WinSetAlwaysOnTop(1, StatusGui.Hwnd)
+}
+
+StartupOKClicked(gui) {
+    global startupComplete
+    startupComplete := true
+    gui.Destroy()
 }
