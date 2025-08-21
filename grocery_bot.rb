@@ -289,8 +289,33 @@ class WalmartGroceryAssistant
       item_lower = item_name.downcase.strip
       desc_lower = db_item[:description].downcase.strip
       combined_lower = combined_text.downcase.strip
-
-      match_type = item_lower == desc_lower || item_lower == combined_lower ? :exact : :fuzzy
+      
+      # Consider it an exact match if:
+      # 1. Strings are exactly equal, OR
+      # 2. The database description is contained in the search term, OR  
+      # 3. Search term matches description + modifier (accounting for word order)
+      exact_desc_match = (item_lower == desc_lower || item_lower.include?(desc_lower))
+      exact_combined_match = (item_lower == combined_lower || item_lower.include?(combined_lower))
+      
+      # Check if search term is description + extra words that match modifier
+      modifier_enhanced_match = false
+      if db_item[:modifier] && !db_item[:modifier].strip.empty?
+        # Extract words from search term that aren't in the description
+        search_words = item_lower.split(/\s+/)
+        desc_words = desc_lower.split(/\s+/)
+        extra_words = search_words - desc_words
+        
+        # Check if extra words match the modifier
+        modifier_lower = db_item[:modifier].downcase.strip
+        modifier_words = modifier_lower.split(/\s+/)
+        
+        # If all extra words are found in modifier, it's a match
+        if !extra_words.empty? && (extra_words - modifier_words).empty?
+          modifier_enhanced_match = true
+        end
+      end
+      
+      match_type = (exact_desc_match || exact_combined_match || modifier_enhanced_match) ? :exact : :fuzzy
 
       matches << {
         item: db_item,

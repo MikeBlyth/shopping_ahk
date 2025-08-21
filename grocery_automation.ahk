@@ -160,16 +160,19 @@ OpenURL(url) {
     ; Go to address bar and navigate
     WinActivate(TargetWindowHandle)
     WinWaitActive(TargetWindowHandle)
-    Send("^l")  ; Ctrl+L to focus address bar
-    Sleep(100)
-    Send("^a")  ; Select all
-    Sleep(100)
-    SendText(url)
-    Sleep(100)
-    Send("{Enter}")
+    SendInput("^l")  ; Ctrl+L to focus address bar
+    Sleep(50)
+    SendInput("^a")  ; Select all
+    Sleep(50)
+    
+    ; Copy URL to clipboard and paste (fastest method)
+    A_Clipboard := url
+    SendInput("^v")  ; Paste URL
+    Sleep(50)
+    SendInput("{Enter}")
     
     ; Wait a moment for page to start loading
-    Sleep(2000)
+    Sleep(1500)
     
     ; Don't wait for user here - let the next command (SHOW_ITEM_PROMPT) handle user interaction
     WriteStatus("COMPLETED")
@@ -183,16 +186,19 @@ SearchWalmart(searchTerm) {
     searchURL := "https://www.walmart.com/search?q=" . UriEncode(searchTerm)
     
     ; Go to address bar and search
-    Send("^l")  ; Ctrl+L to focus address bar
-    Sleep(100)
-    Send("^a")  ; Select all
-    Sleep(100)
-    SendText(searchURL)
-    Sleep(100)
-    Send("{Enter}")
+    SendInput("^l")  ; Ctrl+L to focus address bar
+    Sleep(50)
+    SendInput("^a")  ; Select all
+    Sleep(50)
+    
+    ; Copy search URL to clipboard and paste (fastest method)
+    A_Clipboard := searchURL
+    SendInput("^v")  ; Paste search URL
+    Sleep(50)
+    SendInput("{Enter}")
     
     ; Wait for search results to load
-    Sleep(3000)
+    Sleep(2000)
     
     ; Don't send anything to Ruby - just wait for user action
     ; Ctrl+Shift+A or Ctrl+Shift+R will complete the command
@@ -200,10 +206,10 @@ SearchWalmart(searchTerm) {
 
 GetCurrentURL() {
     ; Select address bar content to get URL
-    Send("^l")  ; Focus address bar
-    Sleep(100)
-    Send("^c")  ; Copy URL
-    Sleep(100)
+    SendInput("^l")  ; Focus address bar
+    Sleep(50)
+    SendInput("^c")  ; Copy URL
+    Sleep(50)
     
     ; Get URL from clipboard
     currentURL := A_Clipboard
@@ -217,16 +223,25 @@ GetCurrentURL() {
 
 GetCurrentURLSilent() {
     ; Get current URL without writing to response file
-    Send("^l")  ; Focus address bar
+    ; First ensure browser window is active
+    WinActivate(TargetWindowHandle)
+    WinWaitActive(TargetWindowHandle)
+    
+    ; Clear clipboard first
+    A_Clipboard := ""
+    
+    SendInput("^l")  ; Focus address bar
     Sleep(100)
-    Send("^c")  ; Copy URL
+    SendInput("^a")  ; Select all in address bar
+    Sleep(50)
+    SendInput("^c")  ; Copy URL
     Sleep(100)
     
     ; Get URL from clipboard
     currentURL := A_Clipboard
     
-    ; Clear clipboard
-    A_Clipboard := ""
+    ; Debug log the captured URL
+    FileAppend("GetCurrentURLSilent captured: " . currentURL . "`n", "command_debug.txt")
     
     return currentURL
 }
@@ -553,6 +568,9 @@ ShowAddItemDialog(suggestedName) {
 
 ShowAddItemDialogHotkey() {
     FileAppend("ShowAddItemDialogHotkey called`n", "command_debug.txt")
+    
+    ; Small delay to ensure page is ready and clipboard is clear
+    Sleep(200)
     
     ; Get current URL (silent - doesn't write to response file)
     currentUrl := GetCurrentURLSilent()
