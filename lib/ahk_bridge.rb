@@ -62,15 +62,21 @@ class AhkBridge
   def get_price_input
     response = send_command_and_wait('GET_PRICE_INPUT')
 
-    if response.start_with?('price|')
-      price_str = response.split('|', 2)[1]
-      begin
-        Float(price_str)
-      rescue ArgumentError
+    # Handle parsed response hash
+    if response[:raw_response]
+      raw = response[:raw_response]
+      if raw.start_with?('price|')
+        price_str = raw.split('|', 2)[1]
+        begin
+          Float(price_str)
+        rescue ArgumentError
+          nil
+        end
+      elsif raw == 'cancelled'
+        nil
+      else
         nil
       end
-    elsif response == 'cancelled'
-      nil
     else
       nil
     end
@@ -79,20 +85,27 @@ class AhkBridge
   def show_multiple_choice(title:, options:, allow_skip: true)
     # Format: SHOW_MULTIPLE_CHOICE|title|allow_skip|option1|option2|...
     params = [title, allow_skip.to_s] + options
-    response = send_command_and_wait("SHOW_MULTIPLE_CHOICE|#{params.join('|')}")
-    if response.start_with?('choice|')
-      choice_str = response.split('|', 2)[1]
-      begin
-        Integer(choice_str)
-      rescue ArgumentError
-        nil
-      end
-    elsif %w[cancelled skipped].include?(response)
-      nil
-    else
-      nil
-    end
+    send_command("SHOW_MULTIPLE_CHOICE|#{params.join('|')}", timeout: nil)
+    get_choice
   end
+
+  def get_choice
+    # Get choice response from multiple choice dialog
+    return nil unless File.exist?(RESPONSE_FILE)
+
+    response = File.read(RESPONSE_FILE).strip
+    File.delete(RESPONSE_FILE) if File.exist?(RESPONSE_FILE)
+    sleep(0.1)
+    
+    puts "🔍 DEBUG: Raw choice response: '#{response}'"
+    
+    choice_num = response.to_i
+    puts "🔍 DEBUG: Parsed choice number: #{choice_num}"
+    
+    # Return nil for skip/cancel (-1), otherwise return the choice number
+    choice_num == -1 ? nil : choice_num
+  end
+
 
   def LIST_COMPLETE
     send_command_and_wait('LIST_COMPLETE')
@@ -135,13 +148,47 @@ class AhkBridge
   end
 
   def read_response
-    return '' unless File.exist?(RESPONSE_FILE)
+    return { skip: true } unless File.exist?(RESPONSE_FILE)
 
     response = File.read(RESPONSE_FILE).strip
     # Delete the response file immediately after reading to prevent stale data
     File.delete(RESPONSE_FILE) if File.exist?(RESPONSE_FILE)
     sleep(0.1) # Small delay to ensure file system operations complete
-    response
+    
+    parse_response(response)
+  end
+
+  def parse_response(response_data)
+    # Parse AHK response into structured hash, return skip flag if needed
+    puts "🔍 DEBUG: Raw response_data: '#{response_data}'"
+    return { skip: true } if response_data.nil? || response_data.strip.empty? || response_data == 'skip'
+    
+    parts = response_data.split('|')
+    puts "🔍 DEBUG: Parsing response: #{parts.inspect}"
+    puts "🔍 DEBUG: parts.length = #{parts.length}"
+
+    case parts[0]
+    when 'add_and_purchase'
+      # Standard purchase format: add_and_purchase|description|modifier|priority|default_quantity|url|price|quantity
+      if parts.length >= 8
+        {
+          skip: false,
+          description: parts[1].strip,
+          modifier: parts[2].strip,
+          priority: parts[3].strip.to_i,
+          default_quantity: parts[4].strip.to_i,
+          url: parts[5].strip,
+          price: parts[6].strip,
+          quantity: parts[7].strip.to_i
+        }
+      else
+        puts "❌ Invalid add_and_purchase format: #{response_data}"
+        { skip: true }
+      end
+    else
+      # Other responses (like session_reset, quit, etc.) - pass through as raw string
+      { raw_response: response_data }
+    end
   end
 
   private

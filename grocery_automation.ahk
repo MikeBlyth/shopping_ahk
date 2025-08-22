@@ -305,6 +305,9 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     purchaseGui.priceEdit := priceEdit
     purchaseGui.quantityEdit := quantityEdit
     purchaseGui.is_known := is_known
+    purchaseGui.item_name := item_name
+    purchaseGui.item_description := item_description
+    purchaseGui.default_quantity := default_quantity
     
     ; Button event handlers
     addButton.OnEvent("Click", (*) => PurchaseClickHandler(purchaseGui))
@@ -325,53 +328,62 @@ PurchaseClickHandler(gui) {
         quantity := "1"
     }
     
-    ; Check if price is valid
-    if price = "" || price = "0" || price = "0.00" {
-        ; No purchase, but for new items, still capture URL
-        if !gui.is_known {
-            GetCurrentURLAndRespond("save_url_only")
-        } else {
-            WriteResponse("skip")
-        }
-    } else {
-        ; Valid price entered - record purchase
-        if !IsNumber(price) {
-            MsgBox("Please enter a valid price (numbers only)", "Invalid Price")
-            return
-        }
-        
-        ; For new items, also capture the URL
-        if !gui.is_known {
-            GetCurrentURLAndRespond("purchase_new|" . price . "|" . quantity)
-        } else {
-            WriteResponse("purchase|" . price . "|" . quantity)
-        }
+    ; Validate price
+    if price != "" && !IsNumber(price) {
+        MsgBox("Please enter a valid price (numbers only)", "Invalid Price")
+        return
     }
     
+    ; Get current URL if needed
+    currentURL := GetCurrentURLSilent()
+    
+    ; Always use consistent add_and_purchase format
+    ; For purchase-only of existing items, use blank description/modifier
+    if gui.is_known {
+        ; Purchase-only for existing item: blank description and modifier
+        response := "add_and_purchase|||1|" . gui.default_quantity . "|" . currentURL . "|" . price . "|" . quantity
+    } else {
+        ; New item: use item name as description
+        response := "add_and_purchase|" . gui.item_name . "||1|1|" . currentURL . "|" . price . "|" . quantity
+    }
+    
+    WriteResponse(response)
     WriteStatus("COMPLETED")
     gui.Destroy()
 }
 
 SkipClickHandler(gui) {
-    ; Skip purchase, but for new items, still capture URL
-    if !gui.is_known {
-        GetCurrentURLAndRespond("save_url_only")
+    ; Skip purchase - use consistent format with blank price
+    currentURL := GetCurrentURLSilent()
+    
+    ; Always use consistent add_and_purchase format with blank price (skip purchase)
+    if gui.is_known {
+        ; Skip purchase for existing item: blank description/modifier and blank price
+        response := "add_and_purchase|||1|" . gui.default_quantity . "|" . currentURL . "||1"
     } else {
-        WriteResponse("skip")
+        ; New item but skip purchase: use item name as description, blank price
+        response := "add_and_purchase|" . gui.item_name . "||1|1|" . currentURL . "||1"
     }
     
+    WriteResponse(response)
     WriteStatus("COMPLETED")
     gui.Destroy()
 }
 
 CancelPurchaseClickHandler(gui) {
-    ; Cancel completely - for new items, still save URL
-    if !gui.is_known {
-        GetCurrentURLAndRespond("save_url_only")
+    ; Cancel - same as skip, use consistent format with blank price
+    currentURL := GetCurrentURLSilent()
+    
+    ; Always use consistent add_and_purchase format with blank price (cancel/skip)
+    if gui.is_known {
+        ; Cancel for existing item: blank description/modifier and blank price
+        response := "add_and_purchase|||1|" . gui.default_quantity . "|" . currentURL . "||1"
     } else {
-        WriteResponse("skip")
+        ; New item but cancel: use item name as description, blank price
+        response := "add_and_purchase|" . gui.item_name . "||1|1|" . currentURL . "||1"
     }
     
+    WriteResponse(response)
     WriteStatus("COMPLETED")
     gui.Destroy()
 }
@@ -418,22 +430,22 @@ ShowMultipleChoice(param) {
         choice_text := Trim(result.Value)
         
         if choice_text = "" && allow_skip {
-            WriteResponse("skipped")
+            WriteResponse("-1")
         } else {
             ; Validate numeric choice
             try {
                 choice_num := Integer(choice_text)
                 if choice_num >= 1 && choice_num <= options.Length {
-                    WriteResponse("choice|" . choice_num)
+                    WriteResponse(choice_num)
                 } else {
-                    WriteResponse("skip")
+                    WriteResponse("-1")
                 }
             } catch {
-                WriteResponse("skip")
+                WriteResponse("-1")
             }
         }
     } else {
-        WriteResponse("skip")
+        WriteResponse("-1")
     }
     
     WriteStatus("COMPLETED")
@@ -788,3 +800,4 @@ StartupOKClicked(gui) {
     startupComplete := true
     gui.Destroy()
 }
+

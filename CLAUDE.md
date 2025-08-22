@@ -1,5 +1,14 @@
 # Walmart Grocery Automation System - Additional Instructions
 
+## CARDINAL ARCHITECTURAL RULE: Unified Response Format
+**ALL AutoHotkey dialogs return the SAME format**: `add_and_purchase|description|modifier|priority|default_quantity|url|price|quantity`
+
+- Multiple choice dialogs handle selection internally, then show purchase dialog, then return unified format
+- NO special formats like `choice|1`, `purchase|price|qty`, or any other variations
+- Ruby parser expects ONLY the unified format - no special cases or intermediate formats
+- Any dialog that needs user input must complete the full flow internally before responding
+- When encountering errors, solutions MUST maintain this unified format principle
+
 ## Current System State
 - ✅ **FULLY WORKING**: Walmart grocery automation system is stable and production-ready
 - ✅ **Ctrl+Shift+A item addition**: Works reliably, items properly saved to database
@@ -168,6 +177,14 @@ After shopping list complete:
 - Monitor purchase history accumulation over time
 - Consider any additional automation features
 
+## Future Simplification Opportunity
+**Eliminate Status File Mechanism**: The current status file system (READY/COMPLETED/WAITING_FOR_USER states) adds unnecessary complexity. The architecture should follow a pure request-response pattern where:
+- Ruby sends command → AutoHotkey waits for user if needed → AutoHotkey responds
+- Every command returns a response (even navigation commands can return "ok")
+- WAIT_FOR_USER command is redundant - SEARCH can wait indefinitely and respond when user acts
+- No status file needed - just response-based communication throughout
+- Exception: Multiple choice dialog returns choice numbers (not unified format) as it's a UI helper
+
 ## Item Matching Rules
 - **No 1:1 mapping**: Multiple database items can match a single sheet description
 - **Sheet sync behavior**: When reading sheet, add new items (if prod_id present) or update existing items with changed fields (add-or-update pattern)
@@ -193,3 +210,4 @@ After shopping list complete:
   3. Write a blank line, then the "Shopping list" delimiter in col 1, then the items in the shopping list, which should now have checkmarks for items purchased.
   4. The overall effect is that the updated sheet contains the new, sorted item list followed by the shopping list with purchased items marked.
 - *** As we proceed, nothing should modify the overall flow of Ruby-AHK. No new messages, waits, states, etc. without discussing them first ***
+- For future refactoring: convert communication to JSON
