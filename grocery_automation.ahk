@@ -448,7 +448,7 @@ WriteStatus(status) {
 
 WriteResponse(response) {
     try {
-        ; Convert response to JSON format
+        ; Convert all responses to JSON format for consistency
         response_obj := Map()
         
         ; Parse response string to determine type and data
@@ -504,6 +504,13 @@ WriteResponse(response) {
         FileAppend(json_response, ResponseFile)
         ToolTip("DEBUG: Wrote JSON response: " . SubStr(json_response, 1, 50) . "...", 400, 50)
         SetTimer(() => ToolTip("", 400, 50), -2000)  ; Clear debug tooltip after 2 seconds
+    } catch as e {
+        ; Fallback to simple text if JSON conversion fails
+        if FileExist(ResponseFile)
+            FileDelete(ResponseFile)
+        FileAppend(response, ResponseFile)
+        ToolTip("DEBUG: JSON failed, wrote simple response: " . response, 400, 50)
+        SetTimer(() => ToolTip("", 400, 50), -3000)
     }
 }
 

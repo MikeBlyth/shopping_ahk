@@ -157,3 +157,4 @@
   2. Rewrite the sorted item (product) table which may now be longer than the original
   3. Write a blank line, then the "Shopping list" delimiter in col 1, then the items in the shopping list, which should now have checkmarks for items purchased.
   4. The overall effect is that the updated sheet contains the new, sorted item list followed by the shopping list with purchased items marked.
+- ToDO - Log file that can be used to recover from crash

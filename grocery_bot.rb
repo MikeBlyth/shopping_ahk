@@ -18,81 +18,20 @@ class WalmartGroceryAssistant
     setup_cleanup_handlers
   end
 
-  # Helper method to handle both JSON and legacy response formats
+  # Helper method to ensure response is in expected format
   def parse_response(response)
+    # All responses should now be JSON hashes from AhkBridge.read_response
     if response.is_a?(Hash)
-      # JSON format - already parsed
       response
-    elsif response.is_a?(String)
-      # Legacy pipe-delimited format - convert to hash structure
-      if response.include?('|')
-        parts = response.split('|')
-        case parts[0]
-        when 'purchase_new'
-          {
-            type: 'purchase_new',
-            price: Float(parts[1]),
-            quantity: Integer(parts[2]),
-            url: parts[3]
-          }
-        when 'purchase'
-          {
-            type: 'purchase',
-            price: Float(parts[1]),
-            quantity: Integer(parts[2])
-          }
-        when 'save_url_only'
-          {
-            type: 'save_url_only',
-            url: parts[1]
-          }
-        when 'add_and_purchase'
-          {
-            type: 'add_and_purchase',
-            description: parts[1],
-            modifier: parts[2],
-            priority: Integer(parts[3]),
-            default_quantity: Integer(parts[4]),
-            url: parts[5],
-            price: Float(parts[6]),
-            purchase_quantity: Integer(parts[7])
-          }
-        when 'choice'
-          {
-            type: 'choice',
-            value: Integer(parts[1])
-          }
-        when 'price'
-          {
-            type: 'price',
-            value: Float(parts[1])
-          }
-        else
-          {
-            type: 'data',
-            value: response
-          }
-        end
-      else
-        # Simple string response
-        {
-          type: 'status',
-          value: response
-        }
-      end
     else
-      # Unknown format
+      # Fallback for any unexpected format
+      puts "⚠️ Unexpected response format: #{response.inspect}"
       {
-        type: 'unknown',
-        value: response
+        type: 'error',
+        value: response.to_s,
+        error: 'unexpected_format'
       }
     end
-  rescue ArgumentError, StandardError
-    # If parsing fails, treat as simple status
-    {
-      type: 'status',
-      value: response.to_s
-    }
   end
 
   def start
@@ -162,7 +101,20 @@ class WalmartGroceryAssistant
     @cleanup_done = true
 
     begin
-      puts "\n🧹 Cleaning up and signaling AutoHotkey to close..."
+      puts "\n🧹 Cleaning up and syncing to Google Sheets..."
+
+      # Perform final Google Sheets sync if we have shopping list data
+      if @shopping_list_data && !@shopping_list_data.empty? && @sheets_sync
+        puts "📊 Performing emergency sheet sync before exit..."
+        begin
+          result = @sheets_sync.sync_from_database(@db, @shopping_list_data)
+          puts "✅ Emergency sync complete: #{result[:products]} products, #{result[:shopping_items]} shopping items"
+        rescue StandardError => e
+          puts "❌ Emergency sheet sync failed: #{e.message}"
+        end
+      else
+        puts "ℹ️ No shopping list data to sync"
+      end
 
       # Signal AHK to terminate gracefully
       if @ahk
@@ -458,7 +410,8 @@ class WalmartGroceryAssistant
         
         puts '   💬 Showing user interaction dialog...'
         sleep(1)
-        handle_user_interaction(item_name, db_item)
+        result = handle_user_interaction(item_name, db_item)
+        return if result == :quit  # Exit shopping list processing
       elsif db_item == :search_new_item
         puts '   🔍 User selected "Search for new item" - searching Walmart...'
         search_for_new_item(item_name)
@@ -944,50 +897,40 @@ class WalmartGroceryAssistant
 
     parsed_response = parse_response(response)
     
+    # Check for quit signal first
+    if parsed_response[:type] == 'status' && %w[quit shutdown].include?(parsed_response[:value])
+      puts '✅ User requested exit during item prompt'
+      return :quit
+    end
+    
+    # Update shopping list item immediately with purchase info
     case parsed_response[:type]
     when 'purchase_new'
-      # New item with URL capture
-      price_float = parsed_response[:price]
-      quantity_int = parsed_response[:quantity]
-      captured_url = parsed_response[:url]
-      price_cents = (price_float * 100).to_i
-
-      # Create new database item with captured URL
-      if captured_url && captured_url.include?('walmart.com') && captured_url.include?('/ip/')
-        prod_id = @db.extract_prod_id_from_url(captured_url)
-
-        if prod_id
-          # Create the new item
-          @db.create_item(
-            prod_id: prod_id,
-            url: captured_url,
-            description: item_name,
-            modifier: nil,
-            default_quantity: 1,
-            priority: 5
-          )
-
-          # Record the purchase
-          new_item = { prod_id: prod_id, description: item_name }
-          record_purchase(new_item, price_cents: price_cents, quantity: quantity_int)
-
-          puts "✅ Saved new item: #{item_name} and recorded purchase"
-        else
-          puts "❌ Could not extract product ID from URL: #{captured_url}"
-        end
-      else
-        puts "❌ Invalid Walmart product URL captured: #{captured_url}"
-      end
-
+      # Mark as purchased and update shopping list with details
+      update_shopping_list_item(item_name, 
+        purchased: '✓',
+        itemno: db_item ? db_item[:prod_id] : '',
+        price_paid: parsed_response[:price],
+        quantity_purchased: parsed_response[:quantity]
+      )
     when 'purchase'
-      # Known item purchase
-      price_float = parsed_response[:price]
-      quantity_int = parsed_response[:quantity]
-      price_cents = (price_float * 100).to_i
-
-      # Record the purchase
+      # Mark as purchased and update shopping list with details
+      update_shopping_list_item(item_name, 
+        purchased: '✓',
+        itemno: db_item ? db_item[:prod_id] : '',
+        price_paid: parsed_response[:price],
+        quantity_purchased: parsed_response[:quantity]
+      )
+      
+      # Still record in database
       if db_item && db_item[:prod_id]
-        record_purchase(db_item, price_cents: price_cents, quantity: quantity_int)
+        price_cents = (parsed_response[:price] * 100).to_i
+        @db.record_purchase(
+          prod_id: db_item[:prod_id],
+          quantity: parsed_response[:quantity],
+          price_cents: price_cents
+        )
+        puts "✅ Recorded purchase in database: #{parsed_response[:quantity]}x #{db_item[:description]} @ $#{parsed_response[:price]}"
       else
         puts "⚠️ Cannot record purchase for unknown item: #{item_name}"
       end
@@ -1064,7 +1007,7 @@ class WalmartGroceryAssistant
     end
   end
 
-  def record_purchase(item, price_cents: nil, quantity: nil)
+  def record_purchase(item, price_cents: nil, quantity: nil, shopping_list_name: nil)
     quantity ||= item[:default_quantity]
 
     @db.record_purchase(
@@ -1073,8 +1016,9 @@ class WalmartGroceryAssistant
       price_cents: price_cents
     )
 
-    # Mark item as completed in shopping list data
-    mark_shopping_item_completed(item[:description])
+    # Mark item as completed in shopping list data using original shopping list name
+    completion_name = shopping_list_name || item[:description]
+    mark_shopping_item_completed(completion_name)
 
     if price_cents
       price_display = "$#{format('%.2f', price_cents / 100.0)}"
@@ -1084,17 +1028,23 @@ class WalmartGroceryAssistant
     end
   end
 
-  def mark_shopping_item_completed(item_description)
+  def update_shopping_list_item(item_name, updates = {})
     return unless @shopping_list_data
 
-    # Find and mark the shopping list item as completed
+    # Find and update the shopping list item
     @shopping_list_data.each do |shopping_item|
-      if shopping_item[:item].downcase == item_description.downcase
-        shopping_item[:purchased] = '✓'
-        puts "✅ Marked shopping item completed: #{item_description}"
+      if shopping_item[:item].downcase == item_name.downcase
+        updates.each do |key, value|
+          shopping_item[key] = value
+        end
+        puts "✅ Updated shopping item: #{item_name} with #{updates.keys.join(', ')}"
         break
       end
     end
+  end
+
+  def mark_shopping_item_completed(item_description)
+    update_shopping_list_item(item_description, purchased: '✓')
   end
 
   def wait_for_ahk_shutdown
@@ -1108,17 +1058,15 @@ class WalmartGroceryAssistant
       
       parsed_response = parse_response(response)
       
-      if (parsed_response[:type] == 'status' && %w[quit shutdown].include?(parsed_response[:value])) || 
-         (response.is_a?(String) && %w[quit shutdown].include?(response))
+      if parsed_response[:type] == 'status' && %w[quit shutdown].include?(parsed_response[:value])
         puts '✅ User requested exit'
         return # Exit the function, which will end wait_for_ahk_shutdown
-      elsif (parsed_response[:type] == 'status' && parsed_response[:value] == 'session_reset') ||
-            (response.is_a?(String) && response == 'session_reset')
+      elsif parsed_response[:type] == 'status' && parsed_response[:value] == 'session_reset'
         puts '🔍 DEBUG: Session complete confirmation received'
         puts '⏳ Waiting for user to exit (Ctrl+Shift+Q) or add items (Ctrl+Shift+A)...'
       elsif response && !response.empty? && 
             !(parsed_response[:type] == 'status' && parsed_response[:value] == 'cancelled') &&
-            !(response.is_a?(String) && response == 'cancelled')
+            parsed_response[:type] != 'status'  # Don't process status responses as items
         puts '📦 Processing existing item response...'
         handle_add_new_item(response)
       end
@@ -1135,18 +1083,16 @@ class WalmartGroceryAssistant
         
         parsed_response = parse_response(response)
         
-        if (parsed_response[:type] == 'status' && %w[quit shutdown].include?(parsed_response[:value])) || 
-           (response.is_a?(String) && %w[quit shutdown].include?(response))
+        if parsed_response[:type] == 'status' && %w[quit shutdown].include?(parsed_response[:value])
           puts '✅ User requested exit'
           break
-        elsif (parsed_response[:type] == 'status' && parsed_response[:value] == 'session_reset') ||
-              (response.is_a?(String) && response == 'session_reset')
+        elsif parsed_response[:type] == 'status' && parsed_response[:value] == 'session_reset'
           puts '🔍 DEBUG: Session complete confirmation received'
           puts '⏳ Waiting for user to exit (Ctrl+Shift+Q) or add items (Ctrl+Shift+A)...'
           # Continue monitoring
         elsif response && !response.empty? && 
               !(parsed_response[:type] == 'status' && parsed_response[:value] == 'cancelled') &&
-              !(response.is_a?(String) && response == 'cancelled')
+              parsed_response[:type] != 'status'  # Don't process status responses as items
           puts '📦 Processing newly added item...'
           handle_add_new_item(response)
         else

@@ -73,30 +73,12 @@ class AhkBridge
     send_command('GET_PRICE_INPUT')
     response = read_response
 
-    if response.is_a?(Hash)
-      # JSON response format
-      case response[:type]
-      when 'price'
-        response[:value]
-      when 'status'
-        response[:value] == 'cancelled' ? nil : nil
-      else
-        nil
-      end
-    elsif response.is_a?(String)
-      # Legacy pipe-delimited format
-      if response.start_with?('price|')
-        price_str = response.split('|', 2)[1]
-        begin
-          Float(price_str)
-        rescue ArgumentError
-          nil
-        end
-      elsif response == 'cancelled'
-        nil
-      else
-        nil
-      end
+    # All responses should now be JSON format
+    case response[:type]
+    when 'price'
+      response[:value]
+    when 'status'
+      response[:value] == 'cancelled' ? nil : nil
     else
       nil
     end
@@ -108,30 +90,12 @@ class AhkBridge
     send_command("SHOW_MULTIPLE_CHOICE|#{params.join('|')}")
 
     response = read_response
-    if response.is_a?(Hash)
-      # JSON response format
-      case response[:type]
-      when 'choice'
-        response[:value]
-      when 'status'
-        %w[cancelled skipped].include?(response[:value]) ? nil : nil
-      else
-        nil
-      end
-    elsif response.is_a?(String)
-      # Legacy pipe-delimited format
-      if response.start_with?('choice|')
-        choice_str = response.split('|', 2)[1]
-        begin
-          Integer(choice_str)
-        rescue ArgumentError
-          nil
-        end
-      elsif %w[cancelled skipped].include?(response)
-        nil
-      else
-        nil
-      end
+    # All responses should now be JSON format
+    case response[:type]
+    when 'choice'
+      response[:value]
+    when 'status'
+      %w[cancelled skipped].include?(response[:value]) ? nil : nil
     else
       nil
     end
@@ -187,13 +151,15 @@ class AhkBridge
     File.delete(RESPONSE_FILE) if File.exist?(RESPONSE_FILE)
     sleep(0.1) # Small delay to ensure file system operations complete
     
-    # Try to parse as JSON first
+    # All responses should now be JSON format
     begin
       parsed = JSON.parse(response_text, symbolize_names: true)
       return parsed
-    rescue JSON::ParserError
-      # Fallback to original string format for backwards compatibility
-      return response_text
+    rescue JSON::ParserError => e
+      puts "⚠️ Failed to parse JSON response: #{response_text}"
+      puts "   Error: #{e.message}"
+      # Return a fallback structure
+      return { type: 'error', value: response_text, error: 'json_parse_failed' }
     end
   end
 
