@@ -172,10 +172,53 @@ After shopping list complete:
 - **Final Solution**: Proper response file processing instead of clearing, better monitoring loop
 - **Status**: All file communication now reliable and race-condition free
 
+### Multiple Choice Dialog Unified Format (August 2025) - WIP 🚧
+- **Issue**: Multiple choice dialog violated unified response format by returning `choice|1` instead of `add_and_purchase` format
+- **Architectural Decision**: Multiple choice is exception - UI helper that returns simple choice numbers, not business logic
+- **Implementation**: 
+  - AutoHotkey `ShowMultipleChoice()` returns simple numbers (1,2,3) or -1 for skip/cancel
+  - Ruby `get_choice()` method handles choice parsing separately from business logic responses
+  - All other dialogs maintain unified `add_and_purchase|description|modifier|priority|default_quantity|url|price|quantity` format
+- **Status**: ✅ Choice selection working, ❌ Navigation to chosen item URL not implemented
+- **Next**: Fix navigation - when user selects choice N, Ruby needs to navigate to that item's URL before showing purchase dialog
+
+## Current Session Summary (August 2025)
+**Objective**: Fix multiple choice dialog to maintain unified response format architecture
+**Status**: Partially complete - choice selection works, navigation issue remains
+
+**What was accomplished:**
+1. **Identified architectural violation**: Multiple choice dialog was returning `choice|1` format instead of unified `add_and_purchase` format
+2. **Made architectural decision**: Multiple choice is UI helper exception - returns simple choice numbers, not business logic format
+3. **Implemented separation**: 
+   - `show_multiple_choice()` + `get_choice()` for UI helpers (returns integers)
+   - `send_command_and_wait()` + `parse_response()` for business logic (returns structured hash)
+4. **Updated AutoHotkey**: Returns simple numbers (1,2,3) or -1 for skip/cancel
+5. **Added debugging**: Throughout response parsing pipeline
+6. **Tested**: Choice selection working correctly, Ruby receives proper choice numbers
+
+**Current Issue**: 
+- When user selects an item from multiple choices, Ruby gets the choice number and item data correctly
+- But AutoHotkey doesn't navigate to the chosen item's URL before showing purchase dialog
+- Need to add navigation call in Ruby after getting choice and before showing item prompt
+
+**Next Session Tasks**:
+1. Fix navigation: Ruby should call `ahk.open_url(selected_item[:url])` after choice selection
+2. Test complete multiple choice → navigation → purchase flow
+3. Remove debugging output once working
+4. Consider implementing status file elimination simplification
+
+**Important Development Guidelines**:
+- **Try simple fixes first** before making architectural changes
+- **Don't change the Ruby-AHK communication flow** without explicit discussion
+- **Maintain the cardinal rule**: All business logic dialogs return unified `add_and_purchase` format
+- **No new messages, waits, states** without discussion first
+- **Prefer editing existing code** over creating new files
+
 ## Next Steps if Continued
+- Complete multiple choice navigation fix
 - Push git repository to GitHub (need to create `shopping_ahk` repo first)
 - Monitor purchase history accumulation over time
-- Consider any additional automation features
+- Consider implementing status file elimination for cleaner architecture
 
 ## Future Simplification Opportunity
 **Eliminate Status File Mechanism**: The current status file system (READY/COMPLETED/WAITING_FOR_USER states) adds unnecessary complexity. The architecture should follow a pure request-response pattern where:

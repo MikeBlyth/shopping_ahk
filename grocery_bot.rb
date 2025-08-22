@@ -419,11 +419,7 @@ class WalmartGroceryAssistant
       # Check if item exists in database
       db_item = find_item_in_database(item_name)
 
-      response = if db_item.is_a?(Hash) && db_item.key?(:description)
-        # This is a purchase response from multiple choice - already complete
-        puts "   ✅ Multiple choice completed with purchase decision"
-        db_item
-      elsif db_item && db_item != :search_new_item
+      response = if db_item && db_item != :search_new_item
         puts "   ✅ Found in database: #{db_item[:prod_id]} - #{db_item[:description]}"
         navigate_to_known_item(db_item)
 
