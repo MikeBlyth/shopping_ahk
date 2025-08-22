@@ -203,10 +203,27 @@ After shopping list complete:
 5. **ItemID Storage**: Fixed ItemIDs not being saved after multi-choice purchases by passing ItemID through completion chain
 6. **Response Format Consistency**: All purchase dialogs now return unified format, AutoHotkey skip sends quantity=0
 
+### Empty Shopping List Flow Fix (August 2025) - RESOLVED ✅
+- **Issue**: System would exit immediately when all shopping list items had purchase marks, skipping manual addition phase
+- **Root Cause**: Flow logic would terminate early instead of continuing to wait for Ctrl+Shift+A commands
+- **Solution**: Restructured main flow to always continue to manual addition phase regardless of shopping list state
+- **Implementation**: Simple message change with preserved original flow structure - no complex nested logic
+- **Status**: ✅ FIXED - System now properly waits for manual additions when shopping list is complete/empty
+
+### Final Duplicate Processing Resolution (August 2025) - RESOLVED ✅
+- **Issue**: Despite duplicate filtering, items like "Milk" were still being reprocessed when one had purchase mark and one didn't
+- **Root Cause**: Duplicate removal happened AFTER purchase filtering, so marked duplicates were filtered out but unmarked duplicates passed through
+- **Solution**: Moved duplicate removal to happen FIRST, before any other filtering - ensures only first occurrence of each item name is kept
+- **Critical Fix**: User feedback identified this as regression - "duplicate removal should happen BEFORE purchase filtering, not after"
+- **Implementation**: Modified `load_items_to_order` to deduplicate ALL shopping items first, then apply purchase mark filter to unique items only
+- **Status**: ✅ FIXED - Duplicate items no longer bypass purchase mark filtering
+
 ## Current System State (August 2025)
+- ✅ **FULLY STABLE**: All major bugs resolved, system ready for production use
+- ✅ **Empty shopping list handling**: Properly continues to manual addition phase when no items to order
+- ✅ **Final duplicate prevention**: Robust deduplication prevents any reprocessing of marked items
 - ✅ **Multiple choice dialog**: Working with proper navigation flow
-- ✅ **Shopping list with ItemIDs**: Complete price calculations and ItemID persistence
-- ✅ **Duplicate prevention**: Robust duplicate filtering prevents reordering completed items
+- ✅ **Shopping list with ItemIDs**: Complete price calculations and ItemID persistence  
 - ✅ **Clean startup/shutdown**: Proper file cleanup and quit handling
 - ✅ **Validation dialogs**: Required fields with inline error messages
 - ✅ **Price calculations**: Accurate totals for current and previous session purchases
