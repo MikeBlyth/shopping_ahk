@@ -289,21 +289,25 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     purchaseGui.Add("Text", "xm y+15 w400", "Item: " . item_description)
     
     ; Price field
-    purchaseGui.Add("Text", "xm y+15", "Price (leave blank to skip):")
+    purchaseGui.Add("Text", "xm y+15", "Price (required):")
     priceEdit := purchaseGui.Add("Edit", "w150 r1")
     purchaseGui.Add("Text", "x+5 yp+3", "$")
     
     ; Quantity field
-    purchaseGui.Add("Text", "xm y+10", "Quantity:")
+    purchaseGui.Add("Text", "xm y+10", "Quantity (required):")
     quantityEdit := purchaseGui.Add("Edit", "w150 r1", default_quantity)
     
+    ; Error message area
+    errorText := purchaseGui.Add("Text", "xm y+15 w400 cRed", "")
+    
     ; Buttons
-    addButton := purchaseGui.Add("Button", "xm y+20 w100 h30", "Record Purchase")
+    addButton := purchaseGui.Add("Button", "xm y+10 w100 h30", "Record Purchase")
     skipButton := purchaseGui.Add("Button", "x+10 w100 h30", "Skip/Cancel")
     
     ; Store references for event handlers
     purchaseGui.priceEdit := priceEdit
     purchaseGui.quantityEdit := quantityEdit
+    purchaseGui.errorText := errorText
     purchaseGui.is_known := is_known
     purchaseGui.item_name := item_name
     purchaseGui.item_description := item_description
@@ -323,14 +327,28 @@ PurchaseClickHandler(gui) {
     price := Trim(gui.priceEdit.Text)
     quantity := Trim(gui.quantityEdit.Text)
     
-    ; Validate quantity
-    if quantity = "" || !IsNumber(quantity) || Integer(quantity) < 1 {
-        quantity := "1"
+    ; Clear previous error message
+    gui.errorText.Text := ""
+    
+    ; Validate both fields are required
+    if price = "" {
+        gui.errorText.Text := "❌ Price is required. Use Skip/Cancel button if you don't want to record a purchase."
+        return
     }
     
-    ; Validate price
-    if price != "" && !IsNumber(price) {
-        MsgBox("Please enter a valid price (numbers only)", "Invalid Price")
+    if quantity = "" {
+        gui.errorText.Text := "❌ Quantity is required."
+        return
+    }
+    
+    ; Validate formats
+    if !IsNumber(price) {
+        gui.errorText.Text := "❌ Please enter a valid price (numbers only)"
+        return
+    }
+    
+    if !IsNumber(quantity) || Integer(quantity) < 1 {
+        gui.errorText.Text := "❌ Please enter a valid quantity (1 or greater)"
         return
     }
     
@@ -359,10 +377,10 @@ SkipClickHandler(gui) {
     ; Always use consistent add_and_purchase format with blank price (skip purchase)
     if gui.is_known {
         ; Skip purchase for existing item: blank description/modifier and blank price
-        response := "add_and_purchase|||1|" . gui.default_quantity . "|" . currentURL . "||1"
+        response := "add_and_purchase|||1|" . gui.default_quantity . "|" . currentURL . "||0"
     } else {
         ; New item but skip purchase: use item name as description, blank price
-        response := "add_and_purchase|" . gui.item_name . "||1|1|" . currentURL . "||1"
+        response := "add_and_purchase|" . gui.item_name . "||1|1|" . currentURL . "||0"
     }
     
     WriteResponse(response)
@@ -377,10 +395,10 @@ CancelPurchaseClickHandler(gui) {
     ; Always use consistent add_and_purchase format with blank price (cancel/skip)
     if gui.is_known {
         ; Cancel for existing item: blank description/modifier and blank price
-        response := "add_and_purchase|||1|" . gui.default_quantity . "|" . currentURL . "||1"
+        response := "add_and_purchase|||1|" . gui.default_quantity . "|" . currentURL . "||0"
     } else {
         ; New item but cancel: use item name as description, blank price
-        response := "add_and_purchase|" . gui.item_name . "||1|1|" . currentURL . "||1"
+        response := "add_and_purchase|" . gui.item_name . "||1|1|" . currentURL . "||0"
     }
     
     WriteResponse(response)

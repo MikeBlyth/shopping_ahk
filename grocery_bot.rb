@@ -213,10 +213,25 @@ class WalmartGroceryAssistant
       end
 
       # Store shopping list for later rewriting (keep all items, not just ones to order)
-      @shopping_list_data = shopping_items
+      # Remove any TOTAL rows that may have slipped through (including "TOTAL:")
+      @shopping_list_data = shopping_items.reject { |item| item[:item].upcase.start_with?('TOTAL') }
 
-      # Return just the item names for processing
-      items_to_order.map { |item| item[:item] }
+      # Remove duplicates from items to order (keep first occurrence only)
+      unique_items_to_order = []
+      processed_names = Set.new
+      
+      items_to_order.each do |item|
+        item_name = item[:item].downcase
+        unless processed_names.include?(item_name)
+          unique_items_to_order << item[:item]
+          processed_names.add(item_name)
+        end
+      end
+
+      puts "🔄 Found #{items_to_order.length} items to order, #{unique_items_to_order.length} unique" if items_to_order.length != unique_items_to_order.length
+
+      # Return unique item names for processing
+      unique_items_to_order
     else
       # Fallback if sheets not available
       @shopping_list_data = []
@@ -227,10 +242,22 @@ class WalmartGroceryAssistant
   def sync_database_to_sheets
     return unless @sheets_sync
 
-    # Pass shopping list data to preserve it during sheet rewrite
-    shopping_data = @shopping_list_data || []
-    result = @sheets_sync.sync_from_database(@db, shopping_data)
-    # Sync happens silently in background
+    begin
+      # Pass shopping list data to preserve it during sheet rewrite
+      shopping_data = @shopping_list_data || []
+      result = @sheets_sync.sync_from_database(@db, shopping_data)
+      puts "✅ Successfully synced to Google Sheets"
+    rescue => e
+      error_msg = "❌ Google Sheets sync failed: #{e.message}"
+      puts error_msg
+      
+      # Try to show error in AutoHotkey if possible
+      begin
+        @ahk.show_message(error_msg) if @ahk
+      rescue
+        # If AHK communication fails, just continue
+      end
+    end
   end
 
   def load_grocery_list_from_sheets
@@ -434,8 +461,11 @@ class WalmartGroceryAssistant
         search_for_new_item(item_name)
       end
 
-      # Handle response: skip or process (response is already parsed by ahk_bridge)
-      if response[:skip]
+      # Handle response: check for quit first, then skip or process
+      if response[:raw_response] && %w[quit shutdown].include?(response[:raw_response])
+        puts "✅ User requested exit during item processing"
+        return  # Exit the processing loop immediately
+      elsif response[:skip]
         puts "   ⏭️ Skipping item: #{item_name}"
         mark_shopping_item_skipped(item_name)
       else
@@ -743,11 +773,11 @@ class WalmartGroceryAssistant
 
       # Mark with quantity if provided and > 0, otherwise mark as skipped
       if quantity && quantity > 0
-        shopping_item[:purchased] = quantity.to_s
-        puts "✅ Marked shopping item completed: #{item_description} (qty: #{quantity})"
+        shopping_item[:purchased] = "✅#{quantity}"
+        puts "✅ Marked shopping item completed: #{item_description} (qty: #{quantity})".colorize(:green)
       else
-        shopping_item[:purchased] = '✗'
-        puts "✗ Marked shopping item as no purchase: #{item_description}"
+        shopping_item[:purchased] = '❌'
+        puts "❌ Marked shopping item as no purchase: #{item_description}".colorize(:red)
       end
       break
     end
@@ -760,8 +790,8 @@ class WalmartGroceryAssistant
     @shopping_list_data.each do |shopping_item|
       next unless shopping_item[:item].downcase == item_description.downcase
 
-      shopping_item[:purchased] = 'skipped'
-      puts "⏭️ Marked shopping item skipped: #{item_description}"
+      shopping_item[:purchased] = '❌'
+      puts "❌ Marked shopping item skipped: #{item_description}".colorize(:red)
       break
     end
   end

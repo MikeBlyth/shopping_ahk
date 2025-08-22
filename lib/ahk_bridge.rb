@@ -171,14 +171,18 @@ class AhkBridge
     when 'add_and_purchase'
       # Standard purchase format: add_and_purchase|description|modifier|priority|default_quantity|url|price|quantity
       if parts.length >= 8
+        price = parts[6].strip
+        # Empty price means user skipped purchase
+        is_skip = price.empty?
+        
         {
-          skip: false,
+          skip: is_skip,
           description: parts[1].strip,
           modifier: parts[2].strip,
           priority: parts[3].strip.to_i,
           default_quantity: parts[4].strip.to_i,
           url: parts[5].strip,
-          price: parts[6].strip,
+          price: price,
           quantity: parts[7].strip.to_i
         }
       else

@@ -117,12 +117,13 @@ module GoogleSheetsIntegration
           next
         end
         
-        # Skip rows without item names
-        next if item_col && (row[item_col].nil? || row[item_col].to_s.strip.empty?)
+        # Skip rows without item names or TOTAL rows (including "TOTAL:")
+        item_name = item_col ? (row[item_col]&.strip || '') : ''
+        next if item_name.empty? || item_name.upcase.start_with?('TOTAL')
         
         item_data = {
           purchased: purchased_col ? (row[purchased_col]&.strip || '') : '',
-          item: item_col ? (row[item_col]&.strip || '') : '',
+          item: item_name,
           modifier: modifier_col ? (row[modifier_col]&.strip || '') : '',
           priority: priority_col && row[priority_col] && !row[priority_col].strip.empty? ? row[priority_col].strip.to_i : 1,
           quantity: quantity_col ? parse_quantity(row[quantity_col]) : 1,
@@ -349,16 +350,83 @@ module GoogleSheetsIntegration
       all_rows << ['Shopping List', '', '', '', '', '', '', '']
       
       # 5. Shopping list items (preserve existing purchase marks)
+      total_spent_cents = 0
+      
       shopping_list_data.each do |shopping_item|
         # Preserve any existing purchase mark (checkmark, x, etc.)
         purchased_mark = shopping_item[:purchased] || ''
         
-        row = [purchased_mark, shopping_item[:item], shopping_item[:modifier] || '', 
-               shopping_item[:priority] == 1 ? '' : shopping_item[:priority].to_s, 
-               shopping_item[:quantity].to_s, shopping_item[:last_purchased] || '', 
-               shopping_item[:itemno] || '', shopping_item[:url] || '']
+        # Look up item in database to get ItemID (regardless of purchase status)
+        item = nil
+        found_by_id = false
+        
+        # Try to use ItemID from shopping list first (column D)
+        if shopping_item[:itemno] && !shopping_item[:itemno].strip.empty?
+          puts "🔍 DEBUG: Looking up by ItemID '#{shopping_item[:itemno]}'"
+          item = database.find_item_by_prod_id(shopping_item[:itemno])
+          found_by_id = true if item
+          puts "🔍 DEBUG: Found by ID: #{item ? 'YES' : 'NO'}"
+        end
+        
+        # Fall back to name search if no ItemID or ID not found
+        if item.nil?
+          puts "🔍 DEBUG: Looking up by name '#{shopping_item[:item]}'"
+          items = database.find_all_items_by_description(shopping_item[:item])
+          puts "🔍 DEBUG: Found #{items.length} items by name"
+          if items.any?
+            # Check for exact match
+            exact_match = items.find { |db_item| db_item[:description].downcase == shopping_item[:item].downcase }
+            if exact_match
+              item = exact_match
+              found_by_id = true  # Treat exact name match as reliable
+              # Store the found ItemID back to shopping list for future use
+              shopping_item[:itemno] = item[:prod_id]
+              puts "🔍 DEBUG: Exact match found, storing ItemID: #{item[:prod_id]}"
+            else
+              puts "🔍 DEBUG: Only fuzzy matches found, skipping ItemID for '#{shopping_item[:item]}'"
+            end
+          end
+        end
+        
+        # Calculate total price if item was purchased (has a numeric purchased mark)
+        total_price = ''
+        if purchased_mark.match?(/✅(\d+)/) && item && found_by_id
+          # Extract quantity from the purchased mark (e.g., "✅5" -> 5)
+          quantity = purchased_mark.match(/✅(\d+)/)[1].to_i
+          
+          puts "🔍 DEBUG: Calculating price for purchased item: #{item[:prod_id]} - #{item[:description]}"
+          recent_purchases = database.get_purchase_history(item[:prod_id], limit: 1)
+          puts "🔍 DEBUG: Found #{recent_purchases.length} recent purchases"
+          
+          if recent_purchases.any?
+            unit_price_cents = recent_purchases.first[:price_cents]
+            purchase_quantity = recent_purchases.first[:quantity]
+            puts "🔍 DEBUG: Purchase - price: #{unit_price_cents}, qty: #{purchase_quantity}, using qty: #{quantity}"
+            
+            if unit_price_cents && unit_price_cents > 0
+              total_price_cents = unit_price_cents * quantity
+              total_price = "$#{'%.2f' % (total_price_cents / 100.0)}"
+              total_spent_cents += total_price_cents
+              puts "🔍 DEBUG: Calculated total: #{total_price}"
+            end
+          else
+            puts "🔍 DEBUG: No purchase history found for #{item[:prod_id]}"
+          end
+        elsif item
+          puts "🔍 DEBUG: Item found but either not purchased or not exact match: #{item[:prod_id]}"
+        else
+          puts "🔍 DEBUG: No item found for '#{shopping_item[:item]}'"
+        end
+        
+        row = [purchased_mark, shopping_item[:item], total_price, shopping_item[:itemno] || '']
         
         all_rows << row
+      end
+      
+      # 6. Add total row at bottom if there were any purchases
+      if total_spent_cents > 0
+        total_formatted = "$#{'%.2f' % (total_spent_cents / 100.0)}"
+        all_rows << ['', 'TOTAL:', total_formatted, '']
       end
       
       # Clear entire sheet and rewrite
