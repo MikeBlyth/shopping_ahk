@@ -1,6 +1,9 @@
 ; Walmart Grocery Automation with Hotkey Trigger
 ; Press Ctrl+Shift+R when you're ready on the Walmart page
 
+; Include JSON library
+#Include lib/jsongo.v2.ahk
+
 ; File paths for communication
 ScriptDir := A_ScriptDir
 CommandFile := ScriptDir . "\ahk_command.txt"
@@ -67,17 +70,24 @@ ProcessCommand(command) {
     ; Debug: Log all commands received
     FileAppend("Received command: '" . command . "'`n", "command_debug.txt")
     
-    pipe_pos := InStr(command, "|")
-    if (pipe_pos > 0) {
-        action := SubStr(command, 1, pipe_pos - 1)
-        param := SubStr(command, pipe_pos + 1)
-    } else {
-        action := command
-        param := ""
+    ; Try to parse as JSON first, fallback to pipe-delimited
+    try {
+        cmd_obj := jsongo.Parse(command)
+        action := cmd_obj["action"]
+        param := cmd_obj.Has("param") ? cmd_obj["param"] : ""
+        FileAppend("Parsed JSON - action: '" . action . "', param: '" . param . "'`n", "command_debug.txt")
+    } catch {
+        ; Fallback to pipe-delimited parsing for backwards compatibility
+        pipe_pos := InStr(command, "|")
+        if (pipe_pos > 0) {
+            action := SubStr(command, 1, pipe_pos - 1)
+            param := SubStr(command, pipe_pos + 1)
+        } else {
+            action := command
+            param := ""
+        }
+        FileAppend("Parsed pipe-delimited - action: '" . action . "', param: '" . param . "'`n", "command_debug.txt")
     }
-    
-    ; Debug: Log parsed action and param
-    FileAppend("Parsed action: '" . action . "', param: '" . param . "'`n", "command_debug.txt")
     
     WriteStatus("PROCESSING")
     
@@ -438,10 +448,61 @@ WriteStatus(status) {
 
 WriteResponse(response) {
     try {
+        ; Convert response to JSON format
+        response_obj := Map()
+        
+        ; Parse response string to determine type and data
+        if (response = "ok" || response = "cancelled" || response = "skipped" || response = "continue" || response = "session_reset" || response = "quit") {
+            ; Simple status responses
+            response_obj["type"] := "status"
+            response_obj["value"] := response
+        } else if (InStr(response, "|") > 0) {
+            ; Pipe-delimited responses - convert to structured format
+            parts := StrSplit(response, "|")
+            response_obj["type"] := parts[1]
+            
+            switch parts[1] {
+                case "choice":
+                    response_obj["value"] := Integer(parts[2])
+                case "price":
+                    response_obj["value"] := Float(parts[2])
+                case "purchase":
+                    response_obj["price"] := Float(parts[2])
+                    response_obj["quantity"] := Integer(parts[3])
+                case "purchase_new":
+                    response_obj["price"] := Float(parts[2])
+                    response_obj["quantity"] := Integer(parts[3])
+                    response_obj["url"] := parts.Length >= 4 ? parts[4] : ""
+                case "save_url_only":
+                    response_obj["url"] := parts[2]
+                case "add_and_purchase":
+                    response_obj["description"] := parts[2]
+                    response_obj["modifier"] := parts[3]
+                    response_obj["priority"] := Integer(parts[4])
+                    response_obj["default_quantity"] := Integer(parts[5])
+                    response_obj["url"] := parts[6]
+                    response_obj["price"] := Float(parts[7])
+                    response_obj["purchase_quantity"] := Integer(parts[8])
+                default:
+                    ; For unknown pipe-delimited formats, store as array
+                    response_obj["data"] := []
+                    loop parts.Length - 1 {
+                        response_obj["data"].Push(parts[A_Index + 1])
+                    }
+            }
+        } else {
+            ; Simple string response (like URL)
+            response_obj["type"] := "data"
+            response_obj["value"] := response
+        }
+        
+        ; Convert to JSON and write to file
+        json_response := jsongo.Stringify(response_obj)
+        
         if FileExist(ResponseFile)
             FileDelete(ResponseFile)
-        FileAppend(response, ResponseFile)
-        ToolTip("DEBUG: Wrote response: " . SubStr(response, 1, 50) . "...", 400, 50)
+        FileAppend(json_response, ResponseFile)
+        ToolTip("DEBUG: Wrote JSON response: " . SubStr(json_response, 1, 50) . "...", 400, 50)
         SetTimer(() => ToolTip("", 400, 50), -2000)  ; Clear debug tooltip after 2 seconds
     }
 }

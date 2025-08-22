@@ -1,4 +1,5 @@
 require 'timeout'
+require 'json'
 
 class AhkBridge
   COMMAND_FILE = 'ahk_command.txt'
@@ -9,8 +10,18 @@ class AhkBridge
     clear_files
   end
 
-  def send_command(command, timeout: nil)
-    write_command(command)
+  def send_command(command, timeout: nil, params: nil)
+    if params
+      # Send as JSON command
+      json_command = {
+        action: command,
+        param: params
+      }.to_json
+      write_command(json_command)
+    else
+      # Send as legacy pipe-delimited command
+      write_command(command)
+    end
     wait_for_completion(timeout)
   end
 
@@ -62,15 +73,30 @@ class AhkBridge
     send_command('GET_PRICE_INPUT')
     response = read_response
 
-    if response.start_with?('price|')
-      price_str = response.split('|', 2)[1]
-      begin
-        Float(price_str)
-      rescue ArgumentError
+    if response.is_a?(Hash)
+      # JSON response format
+      case response[:type]
+      when 'price'
+        response[:value]
+      when 'status'
+        response[:value] == 'cancelled' ? nil : nil
+      else
         nil
       end
-    elsif response == 'cancelled'
-      nil
+    elsif response.is_a?(String)
+      # Legacy pipe-delimited format
+      if response.start_with?('price|')
+        price_str = response.split('|', 2)[1]
+        begin
+          Float(price_str)
+        rescue ArgumentError
+          nil
+        end
+      elsif response == 'cancelled'
+        nil
+      else
+        nil
+      end
     else
       nil
     end
@@ -82,15 +108,30 @@ class AhkBridge
     send_command("SHOW_MULTIPLE_CHOICE|#{params.join('|')}")
 
     response = read_response
-    if response.start_with?('choice|')
-      choice_str = response.split('|', 2)[1]
-      begin
-        Integer(choice_str)
-      rescue ArgumentError
+    if response.is_a?(Hash)
+      # JSON response format
+      case response[:type]
+      when 'choice'
+        response[:value]
+      when 'status'
+        %w[cancelled skipped].include?(response[:value]) ? nil : nil
+      else
         nil
       end
-    elsif %w[cancelled skipped].include?(response)
-      nil
+    elsif response.is_a?(String)
+      # Legacy pipe-delimited format
+      if response.start_with?('choice|')
+        choice_str = response.split('|', 2)[1]
+        begin
+          Integer(choice_str)
+        rescue ArgumentError
+          nil
+        end
+      elsif %w[cancelled skipped].include?(response)
+        nil
+      else
+        nil
+      end
     else
       nil
     end
@@ -141,11 +182,19 @@ class AhkBridge
   def read_response
     return '' unless File.exist?(RESPONSE_FILE)
 
-    response = File.read(RESPONSE_FILE).strip
+    response_text = File.read(RESPONSE_FILE).strip
     # Delete the response file immediately after reading to prevent stale data
     File.delete(RESPONSE_FILE) if File.exist?(RESPONSE_FILE)
     sleep(0.1) # Small delay to ensure file system operations complete
-    response
+    
+    # Try to parse as JSON first
+    begin
+      parsed = JSON.parse(response_text, symbolize_names: true)
+      return parsed
+    rescue JSON::ParserError
+      # Fallback to original string format for backwards compatibility
+      return response_text
+    end
   end
 
   private

@@ -18,6 +18,83 @@ class WalmartGroceryAssistant
     setup_cleanup_handlers
   end
 
+  # Helper method to handle both JSON and legacy response formats
+  def parse_response(response)
+    if response.is_a?(Hash)
+      # JSON format - already parsed
+      response
+    elsif response.is_a?(String)
+      # Legacy pipe-delimited format - convert to hash structure
+      if response.include?('|')
+        parts = response.split('|')
+        case parts[0]
+        when 'purchase_new'
+          {
+            type: 'purchase_new',
+            price: Float(parts[1]),
+            quantity: Integer(parts[2]),
+            url: parts[3]
+          }
+        when 'purchase'
+          {
+            type: 'purchase',
+            price: Float(parts[1]),
+            quantity: Integer(parts[2])
+          }
+        when 'save_url_only'
+          {
+            type: 'save_url_only',
+            url: parts[1]
+          }
+        when 'add_and_purchase'
+          {
+            type: 'add_and_purchase',
+            description: parts[1],
+            modifier: parts[2],
+            priority: Integer(parts[3]),
+            default_quantity: Integer(parts[4]),
+            url: parts[5],
+            price: Float(parts[6]),
+            purchase_quantity: Integer(parts[7])
+          }
+        when 'choice'
+          {
+            type: 'choice',
+            value: Integer(parts[1])
+          }
+        when 'price'
+          {
+            type: 'price',
+            value: Float(parts[1])
+          }
+        else
+          {
+            type: 'data',
+            value: response
+          }
+        end
+      else
+        # Simple string response
+        {
+          type: 'status',
+          value: response
+        }
+      end
+    else
+      # Unknown format
+      {
+        type: 'unknown',
+        value: response
+      }
+    end
+  rescue ArgumentError, StandardError
+    # If parsing fails, treat as simple status
+    {
+      type: 'status',
+      value: response.to_s
+    }
+  end
+
   def start
     setup_ahk
 
@@ -424,23 +501,41 @@ class WalmartGroceryAssistant
 
   def handle_add_new_item(response_data)
     puts "🔍 DEBUG: Processing add item response: #{response_data}"
-    parts = response_data.split('|')
-    puts "🔍 DEBUG: Split into #{parts.length} parts: #{parts.inspect}"
     
-    # Check if this is the new combined format
-    if parts[0] == 'add_and_purchase' && parts.length >= 8
-      puts "🔍 DEBUG: Using add_and_purchase format"
-      return handle_add_and_purchase(parts[1..-1])
+    parsed_response = parse_response(response_data)
+    
+    case parsed_response[:type]
+    when 'add_and_purchase'
+      puts "🔍 DEBUG: Using JSON add_and_purchase format"
+      return handle_add_and_purchase_json(parsed_response)
+    when 'data', 'unknown'
+      # Try legacy pipe-delimited format
+      if response_data.is_a?(String) && response_data.include?('|')
+        parts = response_data.split('|')
+        puts "🔍 DEBUG: Split into #{parts.length} parts: #{parts.inspect}"
+        
+        # Check if this is the legacy combined format
+        if parts[0] == 'add_and_purchase' && parts.length >= 8
+          puts "🔍 DEBUG: Using legacy add_and_purchase format"
+          return handle_add_and_purchase(parts[1..-1])
+        end
+        
+        # Original format: description|modifier|priority|default_quantity|url
+        return nil if parts.length < 5
+        
+        description = parts[0].strip
+        modifier = parts[1].strip
+        priority = parts[2].strip.to_i
+        default_quantity = parts[3].strip.to_i
+        url = parts[4].strip
+      else
+        puts "❌ Unrecognized response format"
+        return nil
+      end
+    else
+      puts "❌ Unrecognized response type: #{parsed_response[:type]}"
+      return nil
     end
-    
-    # Original format: description|modifier|priority|default_quantity|url
-    return nil if parts.length < 5
-    
-    description = parts[0].strip
-    modifier = parts[1].strip
-    priority = parts[2].strip.to_i
-    default_quantity = parts[3].strip.to_i
-    url = parts[4].strip
     
     return nil if description.empty? || url.empty?
     
@@ -699,6 +794,129 @@ class WalmartGroceryAssistant
     }
   end
 
+  def handle_add_and_purchase_json(parsed_response)
+    puts "🔍 DEBUG: handle_add_and_purchase_json called with: #{parsed_response.inspect}"
+    
+    description = parsed_response[:description]&.strip || ""
+    modifier = parsed_response[:modifier]&.strip || ""
+    priority = parsed_response[:priority] || 1
+    default_quantity = parsed_response[:default_quantity] || 1
+    url = parsed_response[:url]&.strip || ""
+    price = parsed_response[:price]
+    purchase_quantity = parsed_response[:purchase_quantity] || 1
+    
+    return nil if url.empty?
+    
+    # Validate URL format
+    unless url.include?('walmart.com') && url.include?('/ip/')
+      puts "❌ Invalid URL: #{url}"
+      puts "   URL must be a Walmart product page (contain 'walmart.com' and '/ip/')"
+      return nil
+    end
+    
+    # Normalize URL - remove query parameters and fragments
+    url = url.split('?').first.split('#').first
+    
+    # Extract product ID from URL
+    puts "🔍 DEBUG: Extracting product ID from URL: #{url}"
+    prod_id = @db.extract_prod_id_from_url(url)
+    puts "🔍 DEBUG: Extracted product ID: #{prod_id}"
+    return nil unless prod_id
+    
+    # Check if item already exists
+    existing_item = @db.find_item_by_prod_id(prod_id)
+    if existing_item
+      # Determine if this is an update or purchase-only operation
+      if description.empty?
+        puts "💰 Purchase-only mode for existing item: #{existing_item[:description]}"
+        item_for_purchase = existing_item
+      else
+        puts "🔄 Item already exists - updating: #{existing_item[:description]} → #{description}"
+        # Update existing item
+        begin
+          updates = {}
+          updates[:description] = description unless description.empty?
+          updates[:modifier] = modifier unless modifier.empty?
+          updates[:priority] = priority if priority > 0 && priority != existing_item[:priority]
+          updates[:default_quantity] = default_quantity if default_quantity > 0 && default_quantity != existing_item[:default_quantity]
+          
+          if updates.any?
+            @db.update_item(prod_id, updates)
+            puts "🔍 DEBUG: Database update successful for JSON format - updated: #{updates.keys.join(', ')}"
+          end
+          
+          item_for_purchase = @db.find_item_by_prod_id(prod_id)
+        rescue StandardError => e
+          puts "❌ DEBUG: Database update failed: #{e.message}"
+          return nil
+        end
+      end
+      
+      # Record purchase if price is provided
+      if price && price > 0
+        begin
+          price_cents = (price * 100).to_i
+          record_purchase(item_for_purchase, price_cents: price_cents, quantity: purchase_quantity)
+          puts "✅ Recorded purchase: #{purchase_quantity}x #{item_for_purchase[:description]} @ $#{price}"
+        rescue StandardError => e
+          puts "❌ DEBUG: Purchase recording failed: #{e.message}"
+        end
+      else
+        puts "✅ Item processed without purchase (no price provided)"
+      end
+      
+      return item_for_purchase
+    end
+    
+    # For new items, description is required
+    if description.empty?
+      puts "❌ Cannot create new item without description"
+      puts "   (Purchase-only mode only works for existing items)"
+      return nil
+    end
+    
+    # Create new item in database
+    begin
+      @db.create_item(
+        prod_id: prod_id,
+        url: url,
+        description: description,
+        modifier: modifier.empty? ? nil : modifier,
+        default_quantity: default_quantity,
+        priority: priority
+      )
+      puts "✅ New item added: #{description}"
+      
+      # Record purchase if price is provided
+      if price && price > 0
+        price_cents = (price * 100).to_i
+        
+        new_item = {
+          prod_id: prod_id,
+          description: description,
+          default_quantity: default_quantity
+        }
+        
+        record_purchase(new_item, price_cents: price_cents, quantity: purchase_quantity)
+        puts "✅ Recorded purchase: #{purchase_quantity}x #{description} @ $#{price}"
+      else
+        puts "✅ Item added without purchase (no price provided)"
+      end
+      
+      return {
+        prod_id: prod_id,
+        url: url,
+        description: description,
+        modifier: modifier.empty? ? nil : modifier,
+        default_quantity: default_quantity,
+        priority: priority
+      }
+    rescue StandardError => e
+      puts "❌ Failed to create new item: #{e.message}"
+      return nil
+    end
+  end
+
   def handle_user_interaction(item_name, db_item = nil)
     if db_item
       # Known item
@@ -724,73 +942,59 @@ class WalmartGroceryAssistant
       )
     end
 
-    if response&.start_with?('purchase_new|')
-      # Parse "purchase_new|price|quantity|url" - new item with URL capture
-      parts = response.split('|')
-      price_str = parts[1]
-      quantity_str = parts[2]
-      captured_url = parts[3]
+    parsed_response = parse_response(response)
+    
+    case parsed_response[:type]
+    when 'purchase_new'
+      # New item with URL capture
+      price_float = parsed_response[:price]
+      quantity_int = parsed_response[:quantity]
+      captured_url = parsed_response[:url]
+      price_cents = (price_float * 100).to_i
 
-      begin
-        price_float = Float(price_str)
-        quantity_int = Integer(quantity_str)
-        price_cents = (price_float * 100).to_i
+      # Create new database item with captured URL
+      if captured_url && captured_url.include?('walmart.com') && captured_url.include?('/ip/')
+        prod_id = @db.extract_prod_id_from_url(captured_url)
 
-        # Create new database item with captured URL
-        if captured_url && captured_url.include?('walmart.com') && captured_url.include?('/ip/')
-          prod_id = @db.extract_prod_id_from_url(captured_url)
+        if prod_id
+          # Create the new item
+          @db.create_item(
+            prod_id: prod_id,
+            url: captured_url,
+            description: item_name,
+            modifier: nil,
+            default_quantity: 1,
+            priority: 5
+          )
 
-          if prod_id
-            # Create the new item
-            @db.create_item(
-              prod_id: prod_id,
-              url: captured_url,
-              description: item_name,
-              modifier: nil,
-              default_quantity: 1,
-              priority: 5
-            )
+          # Record the purchase
+          new_item = { prod_id: prod_id, description: item_name }
+          record_purchase(new_item, price_cents: price_cents, quantity: quantity_int)
 
-            # Record the purchase
-            new_item = { prod_id: prod_id, description: item_name }
-            record_purchase(new_item, price_cents: price_cents, quantity: quantity_int)
-
-            puts "✅ Saved new item: #{item_name} and recorded purchase"
-          else
-            puts "❌ Could not extract product ID from URL: #{captured_url}"
-          end
+          puts "✅ Saved new item: #{item_name} and recorded purchase"
         else
-          puts "❌ Invalid Walmart product URL captured: #{captured_url}"
+          puts "❌ Could not extract product ID from URL: #{captured_url}"
         end
-      rescue ArgumentError
-        puts '❌ Invalid price or quantity format'
+      else
+        puts "❌ Invalid Walmart product URL captured: #{captured_url}"
       end
 
-    elsif response&.start_with?('purchase|')
-      # Parse "purchase|price|quantity" - known item
-      parts = response.split('|')
-      price_str = parts[1]
-      quantity_str = parts[2]
+    when 'purchase'
+      # Known item purchase
+      price_float = parsed_response[:price]
+      quantity_int = parsed_response[:quantity]
+      price_cents = (price_float * 100).to_i
 
-      begin
-        price_float = Float(price_str)
-        quantity_int = Integer(quantity_str)
-        price_cents = (price_float * 100).to_i
-
-        # Record the purchase
-        if db_item && db_item[:prod_id]
-          record_purchase(db_item, price_cents: price_cents, quantity: quantity_int)
-        else
-          puts "⚠️ Cannot record purchase for unknown item: #{item_name}"
-        end
-      rescue ArgumentError
-        puts '❌ Invalid price or quantity format'
+      # Record the purchase
+      if db_item && db_item[:prod_id]
+        record_purchase(db_item, price_cents: price_cents, quantity: quantity_int)
+      else
+        puts "⚠️ Cannot record purchase for unknown item: #{item_name}"
       end
 
-    elsif response&.start_with?('save_url_only|')
-      # Parse "save_url_only|url" - new item, no purchase, but save URL
-      parts = response.split('|')
-      captured_url = parts[1]
+    when 'save_url_only'
+      # Save URL without purchase
+      captured_url = parsed_response[:url]
 
       if captured_url && captured_url.include?('walmart.com') && captured_url.include?('/ip/')
         prod_id = @db.extract_prod_id_from_url(captured_url)
@@ -902,13 +1106,19 @@ class WalmartGroceryAssistant
       response = @ahk.read_response
       puts "🔍 DEBUG: Read response: '#{response}'"
       
-      if response == 'quit' || response == 'shutdown'
+      parsed_response = parse_response(response)
+      
+      if (parsed_response[:type] == 'status' && %w[quit shutdown].include?(parsed_response[:value])) || 
+         (response.is_a?(String) && %w[quit shutdown].include?(response))
         puts '✅ User requested exit'
         return # Exit the function, which will end wait_for_ahk_shutdown
-      elsif response == 'session_reset'
+      elsif (parsed_response[:type] == 'status' && parsed_response[:value] == 'session_reset') ||
+            (response.is_a?(String) && response == 'session_reset')
         puts '🔍 DEBUG: Session complete confirmation received'
         puts '⏳ Waiting for user to exit (Ctrl+Shift+Q) or add items (Ctrl+Shift+A)...'
-      elsif response && !response.empty? && response != 'cancelled'
+      elsif response && !response.empty? && 
+            !(parsed_response[:type] == 'status' && parsed_response[:value] == 'cancelled') &&
+            !(response.is_a?(String) && response == 'cancelled')
         puts '📦 Processing existing item response...'
         handle_add_new_item(response)
       end
@@ -923,14 +1133,20 @@ class WalmartGroceryAssistant
         response = @ahk.read_response
         puts "🔍 DEBUG: Read response: '#{response}'"
         
-        if response == 'quit' || response == 'shutdown'
+        parsed_response = parse_response(response)
+        
+        if (parsed_response[:type] == 'status' && %w[quit shutdown].include?(parsed_response[:value])) || 
+           (response.is_a?(String) && %w[quit shutdown].include?(response))
           puts '✅ User requested exit'
           break
-        elsif response == 'session_reset'
+        elsif (parsed_response[:type] == 'status' && parsed_response[:value] == 'session_reset') ||
+              (response.is_a?(String) && response == 'session_reset')
           puts '🔍 DEBUG: Session complete confirmation received'
           puts '⏳ Waiting for user to exit (Ctrl+Shift+Q) or add items (Ctrl+Shift+A)...'
           # Continue monitoring
-        elsif response && !response.empty? && response != 'cancelled'
+        elsif response && !response.empty? && 
+              !(parsed_response[:type] == 'status' && parsed_response[:value] == 'cancelled') &&
+              !(response.is_a?(String) && response == 'cancelled')
           puts '📦 Processing newly added item...'
           handle_add_new_item(response)
         else
