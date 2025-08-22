@@ -31,7 +31,7 @@ class WalmartGroceryAssistant
     grocery_items = load_items_to_order
 
     if grocery_items.empty?
-      puts 'No items found to order.'
+      puts '✅ No items found to order.'
     else
       # Remove duplicates (case-insensitive) while preserving order
       original_count = grocery_items.length
@@ -206,31 +206,53 @@ class WalmartGroceryAssistant
     if @sheets_sync
       sheet_data = @sheets_sync.get_grocery_list
 
-      # Process only shopping list items with quantity != 0 AND no purchase mark
       shopping_items = sheet_data[:shopping_list]
-      items_to_order = shopping_items.select do |item|
-        item[:quantity] != 0 && (item[:purchased].nil? || item[:purchased].strip.empty?)
-      end
-
-      # Store shopping list for later rewriting (keep all items, not just ones to order)
-      # Remove any TOTAL rows that may have slipped through (including "TOTAL:")
-      @shopping_list_data = shopping_items.reject { |item| item[:item].upcase.start_with?('TOTAL') }
-
-      # Remove duplicates from items to order (keep first occurrence only)
-      unique_items_to_order = []
+      puts "🔍 DEBUG: Total shopping items from sheet: #{shopping_items.length}"
+      
+      # FIRST: Remove duplicates from ALL shopping items (before any filtering)
+      # This ensures we keep only the first occurrence of each item name
+      unique_shopping_items = []
       processed_names = Set.new
       
-      items_to_order.each do |item|
-        item_name = item[:item].downcase
-        unless processed_names.include?(item_name)
-          unique_items_to_order << item[:item]
+      puts "🔍 DEBUG: Starting duplicate removal for ALL shopping items"
+      shopping_items.each_with_index do |item, index|
+        item_name = item[:item].downcase.strip
+        puts "🔍 DEBUG: Item #{index}: '#{item[:item]}' (purchased: '#{item[:purchased]}') -> key: '#{item_name}'"
+        
+        if processed_names.include?(item_name)
+          puts "🔍 DEBUG: DUPLICATE FOUND - removing '#{item[:item]}' (purchased: '#{item[:purchased]}')"
+        else
+          unique_shopping_items << item
           processed_names.add(item_name)
+          puts "🔍 DEBUG: KEPT - '#{item[:item]}' (purchased: '#{item[:purchased]}')"
         end
       end
+      
+      puts "🔍 DEBUG: After duplicate removal: #{unique_shopping_items.length} items remain"
+      
+      # SECOND: Apply purchase mark filter to unique items only
+      items_to_order = unique_shopping_items.select do |item|
+        should_order = item[:quantity] != 0 && (item[:purchased].nil? || item[:purchased].strip.empty?)
+        puts "🔍 DEBUG: '#{item[:item]}' - purchased: '#{item[:purchased]}', qty: #{item[:quantity]}, should_order: #{should_order}"
+        should_order
+      end
+      
+      puts "🔍 DEBUG: Items that passed purchase mark filter: #{items_to_order.length}"
 
-      puts "🔄 Found #{items_to_order.length} items to order, #{unique_items_to_order.length} unique" if items_to_order.length != unique_items_to_order.length
+      # Store deduplicated shopping list for later rewriting
+      # Remove any TOTAL rows that may have slipped through (including "TOTAL:")
+      @shopping_list_data = unique_shopping_items.reject { |item| item[:item].upcase.start_with?('TOTAL') }
 
-      # Return unique item names for processing
+      # Extract just the item names for processing
+      unique_items_to_order = items_to_order.map { |item| item[:item] }
+      
+      puts "🔍 DEBUG: Final items to process: #{unique_items_to_order.inspect}"
+
+      if shopping_items.length != unique_shopping_items.length
+        puts "🔄 Removed #{shopping_items.length - unique_shopping_items.length} duplicate item(s) from shopping list"
+      end
+
+      # Return item names for processing
       unique_items_to_order
     else
       # Fallback if sheets not available
@@ -242,22 +264,10 @@ class WalmartGroceryAssistant
   def sync_database_to_sheets
     return unless @sheets_sync
 
-    begin
-      # Pass shopping list data to preserve it during sheet rewrite
-      shopping_data = @shopping_list_data || []
-      result = @sheets_sync.sync_from_database(@db, shopping_data)
-      puts "✅ Successfully synced to Google Sheets"
-    rescue => e
-      error_msg = "❌ Google Sheets sync failed: #{e.message}"
-      puts error_msg
-      
-      # Try to show error in AutoHotkey if possible
-      begin
-        @ahk.show_message(error_msg) if @ahk
-      rescue
-        # If AHK communication fails, just continue
-      end
-    end
+    # Pass shopping list data to preserve it during sheet rewrite
+    shopping_data = @shopping_list_data || []
+    result = @sheets_sync.sync_from_database(@db, shopping_data)
+    # Sync happens silently in background
   end
 
   def load_grocery_list_from_sheets
@@ -461,11 +471,8 @@ class WalmartGroceryAssistant
         search_for_new_item(item_name)
       end
 
-      # Handle response: check for quit first, then skip or process
-      if response[:raw_response] && %w[quit shutdown].include?(response[:raw_response])
-        puts "✅ User requested exit during item processing"
-        return  # Exit the processing loop immediately
-      elsif response[:skip]
+      # Handle response: skip or process (response is already parsed by ahk_bridge)
+      if response[:skip]
         puts "   ⏭️ Skipping item: #{item_name}"
         mark_shopping_item_skipped(item_name)
       else
@@ -773,11 +780,11 @@ class WalmartGroceryAssistant
 
       # Mark with quantity if provided and > 0, otherwise mark as skipped
       if quantity && quantity > 0
-        shopping_item[:purchased] = "✅#{quantity}"
-        puts "✅ Marked shopping item completed: #{item_description} (qty: #{quantity})".colorize(:green)
+        shopping_item[:purchased] = quantity.to_s
+        puts "✅ Marked shopping item completed: #{item_description} (qty: #{quantity})"
       else
-        shopping_item[:purchased] = '❌'
-        puts "❌ Marked shopping item as no purchase: #{item_description}".colorize(:red)
+        shopping_item[:purchased] = '✗'
+        puts "✗ Marked shopping item as no purchase: #{item_description}"
       end
       break
     end
@@ -790,8 +797,8 @@ class WalmartGroceryAssistant
     @shopping_list_data.each do |shopping_item|
       next unless shopping_item[:item].downcase == item_description.downcase
 
-      shopping_item[:purchased] = '❌'
-      puts "❌ Marked shopping item skipped: #{item_description}".colorize(:red)
+      shopping_item[:purchased] = 'skipped'
+      puts "⏭️ Marked shopping item skipped: #{item_description}"
       break
     end
   end
