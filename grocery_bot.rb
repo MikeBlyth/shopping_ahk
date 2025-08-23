@@ -213,30 +213,31 @@ class WalmartGroceryAssistant
     if @sheets_sync
       sheet_data = @sheets_sync.get_grocery_list
       
-      # Process only shopping list items with quantity != 0 AND no purchase mark
+      # Get shopping list items and remove duplicates (case-insensitive)
       shopping_items = sheet_data[:shopping_list]
-      items_to_order = shopping_items.select do |item| 
-        item[:quantity] != 0 && (item[:purchased].nil? || item[:purchased].strip.empty?)
-      end
-      
-      # Store shopping list for later rewriting (keep all items, not just ones to order)
-      @shopping_list_data = shopping_items
-
-      # Remove duplicates from items to order (case-insensitive)
-      unique_items = []
+      unique_shopping_items = []
       seen_items = Set.new
       
-      items_to_order.each do |item|
+      shopping_items.each do |item|
         normalized_name = item[:item].strip.downcase
         unless seen_items.include?(normalized_name)
-          unique_items << item[:item]
+          unique_shopping_items << item
           seen_items << normalized_name
         else
           puts "⚠️  Skipping duplicate item: #{item[:item]}"
         end
       end
+      
+      # Store deduplicated shopping list for later rewriting
+      @shopping_list_data = unique_shopping_items
+      
+      # Process only items with quantity != 0 AND no purchase mark
+      items_to_order = unique_shopping_items.select do |item| 
+        item[:quantity] != 0 && (item[:purchased].nil? || item[:purchased].strip.empty?)
+      end
 
-      unique_items
+      # Return just the item names for processing
+      items_to_order.map { |item| item[:item] }
     else
       # Fallback if sheets not available
       @shopping_list_data = []

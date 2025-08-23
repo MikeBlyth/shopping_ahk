@@ -4,6 +4,9 @@
 ; Include JSON library
 #Include lib/jsongo.v2.ahk
 
+; Use fast typing of URL 
+SendMode "Input"
+
 ; File paths for communication
 ScriptDir := A_ScriptDir
 CommandFile := ScriptDir . "\ahk_command.txt"
@@ -168,7 +171,7 @@ OpenURL(url) {
     Sleep(100)
     Send("^a")  ; Select all
     Sleep(100)
-    SendInput(url)
+    Send(url)
     Sleep(100)
     Send("{Enter}")
     
