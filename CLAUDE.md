@@ -91,17 +91,38 @@ At the end of any run, even in case of a crash, the sheet must be sync'd with th
 - The last line should be the TOTAL cost of all the items.
 - Previously purchased items (see above) should display just the same as new ones.
 
-## Enhanced item searching in shopping list cycle
+## Enhanced item searching in shopping list cycle ✅
 
-The when a list item matches an existing item (single or multiple choice), the app opens that URL and a purchase dialog. However, it could be that the user wants to choose an alternative product. For example, another brand or size. Sometimes there are already priority-ranked alternatives and Ruby selects the highest one, but it may be out of stock or otherwise requiring a lower priority  alternative.
+When a shopping list item matches an existing database item, the app opens that URL and shows a purchase dialog. However, the user may want to choose an alternative product (different brand, size, etc.) if the original is out of stock or not preferred.
 
-### Solution
+### Solution - IMPLEMENTED ✅
 
-- Add a "Search Alt" button to the purchase dialog.
-- Clicking that button will return a SEARCH_ALT command to Ruby.
-- Ruby will look for a lower priority exact match to the item description in the database (not necessarily the one in the shopping list). 
-- If there is such a match, it will send that back to AHK as a new item to open.
-- If there is not a match, it will use the *shopping list* item description and send the command to search for the product, the same way it does when there is a non-matching item in the database.
+- **"Search Again" button** added to purchase dialog (replaces Cancel button)
+- Clicking returns `choice|999` response, integrating with existing multi-choice search flow
+- System searches using original shopping list item description  
+- User navigates to preferred alternative and presses **Ctrl+Shift+A** to complete
+- **Key improvement**: Updates the original shopping list item as purchased (not a separate item)
+- **Simplified workflow**: No new commands needed, uses existing hotkey pattern
+
+## Simplified Hotkey System - IMPLEMENTED ✅
+
+The system now operates with just **two user hotkeys**:
+
+### Core Hotkeys
+- **Ctrl+Shift+A**: Add/purchase items after manual navigation (universal hotkey)
+- **Ctrl+Shift+Q**: Quit system cleanly
+
+### Eliminated Complexity
+- **Removed Ctrl+Shift+R**: No longer needed - system auto-starts and uses consistent Ctrl+Shift+A workflow
+- **Unified workflow**: All "navigate then act" scenarios use the same Ctrl+Shift+A pattern:
+  - New items: Search → Navigate → Ctrl+Shift+A
+  - Search Again: Search → Navigate → Ctrl+Shift+A  
+  - Manual additions: Navigate → Ctrl+Shift+A
+
+### Status Display Improvements
+- **Clear instructions**: Status window shows "find your item, then press Ctrl+Shift+A"
+- **Context-aware**: Different messages during search vs completion phases
+- **Always visible**: Persistent status window with current available actions
 
 ## Major Technical Fixes (August 2025)
 
@@ -156,6 +177,19 @@ The when a list item matches an existing item (single or multiple choice), the a
 - **Original Issue**: File-based IPC had timing conflicts with response processing
 - **Final Solution**: Proper response file processing instead of clearing, better monitoring loop
 - **Status**: All file communication now reliable and race-condition free
+
+### Shopping List Completion Fix ✅
+- **Issue**: "Search Again" and new item handling created duplicate items instead of updating original shopping list items
+- **Root Cause**: System used general `handle_add_new_item` instead of shopping list-specific completion
+- **Solution**: Created `handle_shopping_list_completion` method that updates original shopping list item as purchased
+- **Additional Fix**: Added automatic URL capture when dialog URL field is empty/invalid
+- **Result**: Shopping list items now properly marked as purchased instead of creating separate database entries
+
+### Hotkey System Simplification ✅
+- **Removed**: Ctrl+Shift+R hotkey and all related wait functions (`WaitForUser`, `WaitForContinue`)
+- **Unified**: All manual navigation scenarios now use consistent Ctrl+Shift+A pattern
+- **Improved**: Status messages clearly show required actions at each step
+- **Benefit**: Simpler user experience with just two hotkeys to remember
 
 ## Next Steps if Continued
 - Push git repository to GitHub (need to create `shopping_ahk` repo first)
