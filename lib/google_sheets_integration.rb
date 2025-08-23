@@ -348,36 +348,39 @@ module GoogleSheetsIntegration
       # 4. Shopping List delimiter
       all_rows << ['Shopping List', '', '', '', '', '', '', '']
 
-      # 5. Shopping list items (preserve existing purchase marks and add purchase details)
+      # 5. Shopping list items with new display format
+      total_cost = 0.0
+      
       shopping_list_data.each do |shopping_item|
-        # Use purchase mark and purchase details if available
-        purchased_mark = shopping_item[:purchased] || ''
-        
-        # Use actual purchased quantity if available, otherwise original quantity
-        display_quantity = if shopping_item[:quantity_purchased]
-                            shopping_item[:quantity_purchased].to_s
-                          elsif shopping_item[:quantity] == 1
-                            ''
-                          else
-                            shopping_item[:quantity].to_s
-                          end
-        
-        # Use purchase price date as last purchased if we have a purchase
-        last_purchased = if shopping_item[:price_paid]
-                          Date.today.to_s
-                        else
-                          shopping_item[:last_purchased] || ''
-                        end
+        # Format: {✅{qty} | ❌ } | {description} | {total_price = qty*price} | itemid
+        if shopping_item[:price_paid] && shopping_item[:quantity_purchased]
+          # Item was purchased - calculate total price
+          quantity = shopping_item[:quantity_purchased]
+          unit_price = shopping_item[:price_paid]
+          item_total = quantity * unit_price
+          total_cost += item_total
+          
+          purchased_display = "✅#{quantity}"
+          total_price_display = sprintf('%.2f', item_total)
+        else
+          # Item not purchased
+          purchased_display = '❌'
+          total_price_display = ''
+        end
         
         # Use captured item number if available
         item_number = shopping_item[:itemno] || ''
-
-        row = [purchased_mark, shopping_item[:item], shopping_item[:modifier] || '',
-               shopping_item[:priority] == 1 ? '' : shopping_item[:priority].to_s,
-               display_quantity, last_purchased,
-               item_number, shopping_item[:url] || '']
+        
+        # Build row: purchased_display | description | total_price | itemid | (other cols empty)
+        row = [purchased_display, shopping_item[:item], total_price_display, item_number, '', '', '', '']
 
         all_rows << row
+      end
+      
+      # 6. Add TOTAL row as last item
+      if total_cost > 0
+        total_row = ['TOTAL', '', sprintf('%.2f', total_cost), '', '', '', '', '']
+        all_rows << total_row
       end
 
       # Clear entire sheet and rewrite

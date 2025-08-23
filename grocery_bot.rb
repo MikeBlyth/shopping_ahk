@@ -871,14 +871,17 @@ class WalmartGroceryAssistant
   end
 
   def handle_user_interaction(item_name, db_item = nil)
+    # Preserve original shopping list item name for shopping list updates
+    original_shopping_item_name = item_name
+    
     if db_item
-      # Known item
-      item_name = db_item[:description]
+      # Known item - use db_item description for display, but keep original name for shopping list
+      display_name = db_item[:description]
       url = db_item[:url]
       description = "Priority: #{db_item[:priority]}, Default Qty: #{db_item[:default_quantity]}"
 
       response = @ahk.show_item_prompt(
-        item_name,
+        display_name,
         is_known: true,
         url: url,
         description: description,
@@ -906,20 +909,20 @@ class WalmartGroceryAssistant
     # Update shopping list item immediately with purchase info
     case parsed_response[:type]
     when 'purchase_new'
-      # Mark as purchased and update shopping list with details
-      update_shopping_list_item(item_name, 
+      # Mark as purchased and update shopping list with itemid, quantity, and price
+      update_shopping_list_item(original_shopping_item_name, 
         purchased: '✓',
         itemno: db_item ? db_item[:prod_id] : '',
-        price_paid: parsed_response[:price],
-        quantity_purchased: parsed_response[:quantity]
+        price_paid: parsed_response[:price].to_f,
+        quantity_purchased: parsed_response[:quantity].to_i
       )
     when 'purchase'
-      # Mark as purchased and update shopping list with details
-      update_shopping_list_item(item_name, 
+      # Mark as purchased and update shopping list with itemid, quantity, and price
+      update_shopping_list_item(original_shopping_item_name, 
         purchased: '✓',
         itemno: db_item ? db_item[:prod_id] : '',
-        price_paid: parsed_response[:price],
-        quantity_purchased: parsed_response[:quantity]
+        price_paid: parsed_response[:price].to_f,
+        quantity_purchased: parsed_response[:quantity].to_i
       )
       
       # Still record in database
@@ -932,7 +935,7 @@ class WalmartGroceryAssistant
         )
         puts "✅ Recorded purchase in database: #{parsed_response[:quantity]}x #{db_item[:description]} @ $#{parsed_response[:price]}"
       else
-        puts "⚠️ Cannot record purchase for unknown item: #{item_name}"
+        puts "⚠️ Cannot record purchase for unknown item: #{original_shopping_item_name}"
       end
 
     when 'save_url_only'
@@ -947,13 +950,13 @@ class WalmartGroceryAssistant
           @db.create_item(
             prod_id: prod_id,
             url: captured_url,
-            description: item_name,
+            description: original_shopping_item_name,
             modifier: nil,
             default_quantity: 1,
             priority: 5
           )
 
-          puts "✅ Saved new item URL: #{item_name} (no purchase recorded)"
+          puts "✅ Saved new item URL: #{original_shopping_item_name} (no purchase recorded)"
         else
           puts "❌ Could not extract product ID from URL: #{captured_url}"
         end
@@ -1016,9 +1019,16 @@ class WalmartGroceryAssistant
       price_cents: price_cents
     )
 
-    # Mark item as completed in shopping list data using original shopping list name
+    # Update shopping list with itemid, quantity, and price
     completion_name = shopping_list_name || item[:description]
-    mark_shopping_item_completed(completion_name)
+    price_paid = price_cents ? (price_cents / 100.0) : nil
+    
+    update_shopping_list_item(completion_name, 
+      purchased: '✓',
+      itemno: item[:prod_id],
+      price_paid: price_paid,
+      quantity_purchased: quantity
+    )
 
     if price_cents
       price_display = "$#{format('%.2f', price_cents / 100.0)}"
@@ -1043,9 +1053,6 @@ class WalmartGroceryAssistant
     end
   end
 
-  def mark_shopping_item_completed(item_description)
-    update_shopping_list_item(item_description, purchased: '✓')
-  end
 
   def wait_for_ahk_shutdown
     puts "🔍 DEBUG: Starting wait_for_ahk_shutdown loop..."
