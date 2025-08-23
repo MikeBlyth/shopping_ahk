@@ -40,10 +40,6 @@ class AhkBridge
     read_response
   end
 
-  def wait_for_user
-    send_command('WAIT_FOR_USER')
-  end
-
   def show_add_item_dialog(suggested_name = '')
     send_command("ADD_ITEM_DIALOG|#{suggested_name}")
     read_response
@@ -209,7 +205,7 @@ class AhkBridge
           return true
         when 'WAITING_FOR_USER'
           puts '🛑 AHK is waiting for user action...'.colorize(:yellow)
-          # Don't return - keep waiting until user presses Ctrl+Shift+R
+          # This status no longer occurs since we removed wait_for_user functionality
           # The loop will continue and check status again
         end
 

@@ -1,5 +1,5 @@
-; Walmart Grocery Automation with Hotkey Trigger
-; Press Ctrl+Shift+R when you're ready on the Walmart page
+; Walmart Grocery Automation
+; Uses Ctrl+Shift+A to add items and Ctrl+Shift+Q to quit
 
 ; Include JSON library
 #Include lib/jsongo.v2.ahk
@@ -15,7 +15,6 @@ ResponseFile := ScriptDir . "\ahk_response.txt"
 
 ; Global variables
 UserReady := false
-WaitingForUser := false
 StatusGui := ""
 
 ; Initialize
@@ -47,27 +46,6 @@ if !TargetWindowHandle {
 ; Update status for shopping mode
 ShowPersistentStatus("Processing shopping list")
 
-; Hotkey to signal readiness (still available for manual restart if needed)
-^+r::{
-    global UserReady, WaitingForUser, TargetWindowHandle
-    
-    if WaitingForUser {
-        WaitingForUser := false
-        WriteStatus("READY")
-    } else {
-        UserReady := true
-        WriteStatus("READY")
-        TargetWindowHandle := WinExist("A")
-
-        if !TargetWindowHandle {
-            MsgBox("Could not find an active window handle.")
-            ExitApp
-        }
-        
-        ; Update status for shopping mode
-        ShowPersistentStatus("Processing shopping list")
-    }
-}
 
 ; Main loop - check for commands every 500ms
 Loop {
@@ -130,18 +108,12 @@ ProcessCommand(command) {
         case "GET_PRICE_INPUT":
             FileAppend("MATCHED GET_PRICE_INPUT`n", "command_debug.txt")
             GetPriceInput()
-        case "WAIT_FOR_CONTINUE":
-            FileAppend("MATCHED WAIT_FOR_CONTINUE`n", "command_debug.txt")
-            WaitForContinue()
         case "SESSION_COMPLETE":
             FileAppend("MATCHED SESSION_COMPLETE`n", "command_debug.txt")
             ProcessSessionComplete()
         case "ADD_ITEM_DIALOG":
             FileAppend("MATCHED ADD_ITEM_DIALOG`n", "command_debug.txt")
             ShowAddItemDialog(param)
-        case "WAIT_FOR_USER":
-            FileAppend("MATCHED WAIT_FOR_USER`n", "command_debug.txt")
-            WaitForUser()
         case "TERMINATE":
             FileAppend("MATCHED TERMINATE - shutting down`n", "command_debug.txt")
             global StatusGui
@@ -183,6 +155,9 @@ OpenURL(url) {
 }
 
 SearchWalmart(searchTerm) {
+    ; Update status to show what user should do
+    ShowPersistentStatus("Search results shown - find your item, then press Ctrl+Shift+A")
+    
     ; Build search URL
     searchURL := "https://www.walmart.com/search?q=" . UriEncode(searchTerm)
     
@@ -289,17 +264,18 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     ; Buttons
     addButton := purchaseGui.Add("Button", "xm y+20 w100 h30", "Record Purchase")
     skipButton := purchaseGui.Add("Button", "x+10 w100 h30", "Skip Item")
-    cancelButton := purchaseGui.Add("Button", "x+10 w100 h30", "Cancel")
+    searchButton := purchaseGui.Add("Button", "x+10 w100 h30", "Search Again")
     
     ; Store references for event handlers
     purchaseGui.priceEdit := priceEdit
     purchaseGui.quantityEdit := quantityEdit
     purchaseGui.is_known := is_known
+    purchaseGui.item_description := item_description
     
     ; Button event handlers
     addButton.OnEvent("Click", (*) => PurchaseClickHandler(purchaseGui))
     skipButton.OnEvent("Click", (*) => SkipClickHandler(purchaseGui))
-    cancelButton.OnEvent("Click", (*) => CancelPurchaseClickHandler(purchaseGui))
+    searchButton.OnEvent("Click", (*) => SearchAgainClickHandler(purchaseGui))
     
     ; Show dialog
     purchaseGui.Show()
@@ -355,14 +331,9 @@ SkipClickHandler(gui) {
     gui.Destroy()
 }
 
-CancelPurchaseClickHandler(gui) {
-    ; Cancel completely - for new items, still save URL
-    if !gui.is_known {
-        GetCurrentURLAndRespond("save_url_only")
-    } else {
-        WriteResponse("continue")
-    }
-    
+SearchAgainClickHandler(gui) {
+    ; User wants to search for alternatives - return like selecting "search for new item" in multi-choice
+    WriteResponse("choice|999")  ; Use high number to indicate "search for new item" option
     WriteStatus("COMPLETED")
     gui.Destroy()
 }
@@ -497,6 +468,8 @@ WriteResponse(response) {
                     response_obj["url"] := parts[6]
                     response_obj["price"] := Float(parts[7])
                     response_obj["purchase_quantity"] := Integer(parts[8])
+                case "search_again":
+                    response_obj["search_term"] := parts[2]
                 default:
                     ; For unknown pipe-delimited formats, store as array
                     response_obj["data"] := []
@@ -530,49 +503,19 @@ WriteResponse(response) {
 
 ; Reset state after shopping list completion
 ResetForNextSession() {
-    global WaitingForUser, UserReady
-    WaitingForUser := false
+    global UserReady
     UserReady := false
     WriteStatus("WAITING_FOR_HOTKEY")
     ; Tooltip is already set by ProcessSessionComplete, don't override it
 }
 
-WaitForContinue() {
-    global WaitingForUser
-    WaitingForUser := true
-    WriteStatus("WAITING_FOR_USER")
-    ToolTip("Press Ctrl+Shift+R to continue...", 10, 10)
-    
-    ; Wait for user signal
-    while WaitingForUser {
-        Sleep(100)
-    }
-    
-    ToolTip()  ; Clear tooltip
-    WriteStatus("COMPLETED")
-}
-
-WaitForUser() {
-    global WaitingForUser
-    WaitingForUser := true
-    WriteStatus("WAITING_FOR_USER")
-    ToolTip("Press Ctrl+Shift+A to add item or Ctrl+Shift+R to continue...", 10, 10)
-    
-    ; Wait for user signal
-    while WaitingForUser {
-        Sleep(100)
-    }
-    
-    ToolTip()  ; Clear tooltip
-    WriteStatus("COMPLETED")
-}
 
 ; Shopping list processing complete
 ProcessSessionComplete() {
     FileAppend("ProcessSessionComplete called - setting completion tooltip`n", "command_debug.txt")
     WriteResponse("session_reset")
     WriteStatus("WAITING_FOR_HOTKEY")
-    ShowPersistentStatus("Shopping list complete! Press Ctrl+Shift+A to add or purchase item")
+    ShowPersistentStatus("Shopping list complete! Press Ctrl+Shift+A to add items or Ctrl+Shift+Q to quit")
     ResetForNextSession()
 }
 
@@ -591,7 +534,7 @@ ProcessSessionComplete() {
 
 ^+s::{  ; Ctrl+Shift+S to show status
     status := FileExist(StatusFile) ? FileRead(StatusFile) : "No status file"
-    MsgBox("Current Status: " . status . "`n`nPress Ctrl+Shift+R when on Walmart page to start")
+    MsgBox("Current Status: " . status . "`n`nActive hotkeys: Ctrl+Shift+A (add item), Ctrl+Shift+Q (quit)")
 }
 
 ; Add Item Dialog Functions
@@ -677,7 +620,6 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
 
 ; Event handler functions for Add Item dialog
 AddAndPurchaseClickHandler(gui) {
-    global WaitingForUser
     description := Trim(gui.descriptionEdit.Text)
     modifier := Trim(gui.modifierEdit.Text)
     priority := Trim(gui.priorityEdit.Text)
@@ -726,12 +668,18 @@ AddAndPurchaseClickHandler(gui) {
         }
     }
     
+    ; Ensure we have a valid URL - capture current if empty or invalid
+    currentUrl := gui.currentUrl
+    if (currentUrl = "" || !InStr(currentUrl, "walmart.com")) {
+        currentUrl := GetCurrentURLSilent()
+        FileAppend("Captured fresh URL: " . currentUrl . "`n", "command_debug.txt")
+    }
+    
     ; Format response with purchase info
-    response := "add_and_purchase|" . description . "|" . modifier . "|" . priority . "|" . defaultQuantity . "|" . gui.currentUrl . "|" . price . "|" . purchaseQuantity
+    response := "add_and_purchase|" . description . "|" . modifier . "|" . priority . "|" . defaultQuantity . "|" . currentUrl . "|" . price . "|" . purchaseQuantity
     FileAppend("AddAndPurchaseClickHandler - writing response: " . response . "`n", "command_debug.txt")
     WriteResponse(response)
     WriteStatus("COMPLETED")
-    WaitingForUser := false  ; End the wait state
     gui.Destroy()
     
     ; Show confirmation
@@ -739,7 +687,6 @@ AddAndPurchaseClickHandler(gui) {
 }
 
 AddOnlyClickHandler(gui) {
-    global WaitingForUser
     description := Trim(gui.descriptionEdit.Text)
     modifier := Trim(gui.modifierEdit.Text)
     priority := Trim(gui.priorityEdit.Text)
@@ -771,12 +718,18 @@ AddOnlyClickHandler(gui) {
         defaultQuantity := "1"
     }
     
+    ; Ensure we have a valid URL - capture current if empty or invalid
+    currentUrl := gui.currentUrl
+    if (currentUrl = "" || !InStr(currentUrl, "walmart.com")) {
+        currentUrl := GetCurrentURLSilent()
+        FileAppend("Captured fresh URL: " . currentUrl . "`n", "command_debug.txt")
+    }
+    
     ; Format response without purchase info (original format)
-    response := description . "|" . modifier . "|" . priority . "|" . defaultQuantity . "|" . gui.currentUrl
+    response := description . "|" . modifier . "|" . priority . "|" . defaultQuantity . "|" . currentUrl
     FileAppend("AddOnlyClickHandler - writing response: " . response . "`n", "command_debug.txt")
     WriteResponse(response)
     WriteStatus("COMPLETED")
-    WaitingForUser := false  ; End the wait state
     gui.Destroy()
     
     ; Show confirmation
@@ -784,10 +737,8 @@ AddOnlyClickHandler(gui) {
 }
 
 CancelItemClickHandler(gui) {
-    global WaitingForUser
     WriteResponse("cancelled")
     WriteStatus("COMPLETED")
-    WaitingForUser := false  ; End the wait state
     gui.Destroy()
 }
 

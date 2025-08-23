@@ -187,7 +187,7 @@ class WalmartGroceryAssistant
     puts '🎯 AutoHotkey is ready and waiting for you!'
     puts '📋 Instructions:'
     puts '   1. Open your browser to walmart.com'
-    puts "   2. Press Ctrl+Shift+R when you're ready"
+    puts "   2. System will automatically start processing your shopping list"
     puts ''
     puts '⏳ Waiting for ready signal...'
 
@@ -427,32 +427,24 @@ class WalmartGroceryAssistant
         sleep(1)
         result = handle_user_interaction(item_name, db_item)
         return if result == :quit  # Exit shopping list processing
+        
+        # Handle "Search Again" request - treat like multi-choice "search for new item"
+        if result == :search_new_item
+          puts '   🔍 User requested search for alternatives via "Search Again" button'
+          search_for_new_item(item_name)
+          puts '   📍 Navigate to the product you want, then press Ctrl+Shift+A to add/purchase it'
+          wait_for_item_completion(item_name)
+        end
       elsif db_item == :search_new_item
         puts '   🔍 User selected "Search for new item" - searching Walmart...'
         search_for_new_item(item_name)
-        puts '   📍 Navigate to the product you want, then press Ctrl+Shift+A to add it'
-        puts '   🔄 Or press Ctrl+Shift+R to continue to next item'
-        @ahk.wait_for_user
-        
-        # Check if user added an item during the wait
-        response = @ahk.read_response
-        if response && !response.empty? && response != 'cancelled'
-          # New combined approach handles add+purchase in one step
-          handle_add_new_item(response)
-        end
+        puts '   📍 Navigate to the product you want, then press Ctrl+Shift+A to add/purchase it'
+        wait_for_item_completion(item_name)
       else
         puts '   🔍 New item - searching Walmart...'
         search_for_new_item(item_name)
-        puts '   📍 Navigate to the product you want, then press Ctrl+Shift+A to add it'
-        puts '   🔄 Or press Ctrl+Shift+R to continue to next item'
-        @ahk.wait_for_user
-        
-        # Check if user added an item during the wait
-        response = @ahk.read_response
-        if response && !response.empty? && response != 'cancelled'
-          # New combined approach handles add+purchase in one step
-          handle_add_new_item(response)
-        end
+        puts '   📍 Navigate to the product you want, then press Ctrl+Shift+A to add/purchase it'
+        wait_for_item_completion(item_name)
       end
     end
   end
@@ -465,6 +457,114 @@ class WalmartGroceryAssistant
   def search_for_new_item(item_name)
     @ahk.search_walmart(item_name)
     sleep(2)
+  end
+
+  def wait_for_item_completion(item_name)
+    # Wait for user to press Ctrl+Shift+A to complete the item
+    puts '   ⏳ Waiting for item completion via Ctrl+Shift+A...'
+    
+    loop do
+      sleep(1)
+      
+      # Check AHK status - when user presses Ctrl+Shift+A, status will change
+      status = @ahk.check_status
+      
+      case status
+      when 'COMPLETED'
+        # User completed an action - check if there's a response
+        response = @ahk.read_response
+        if response && !response.empty? && response[:type] != 'status'
+          handle_shopping_list_completion(item_name, response)
+          puts "   ✅ Item '#{item_name}' completed"
+          break
+        end
+      when 'SHUTDOWN'
+        puts '   🛑 User requested shutdown during wait'
+        break
+      end
+    end
+  end
+
+  def handle_shopping_list_completion(original_item_name, response_data)
+    # Handle completion of a specific shopping list item via Ctrl+Shift+A
+    puts "🔍 DEBUG: Completing shopping list item '#{original_item_name}' with response: #{response_data}"
+    
+    parsed_response = parse_response(response_data)
+    
+    case parsed_response[:type]
+    when 'add_and_purchase'
+      puts "🔍 DEBUG: Processing shopping list completion with add_and_purchase"
+      
+      # Extract data from response
+      description = parsed_response[:description]
+      modifier = parsed_response[:modifier]
+      priority = parsed_response[:priority] || 1
+      default_quantity = parsed_response[:default_quantity] || 1
+      url = parsed_response[:url]
+      price = parsed_response[:price]
+      purchase_quantity = parsed_response[:purchase_quantity] || 1
+      
+      # Add item to database if URL is valid (using existing proven pattern)
+      db_item = nil
+      if url && url.include?('walmart.com') && url.include?('/ip/')
+        prod_id = @db.extract_prod_id_from_url(url)
+        if prod_id
+          # Check if item already exists
+          existing_item = @db.find_item_by_prod_id(prod_id)
+          if existing_item
+            puts "🔄 Item already exists - updating: #{existing_item[:description]} → #{description}"
+            # Update existing item
+            updates = {}
+            updates[:description] = description unless description.empty?
+            updates[:modifier] = modifier unless modifier.empty?
+            updates[:priority] = priority if priority > 0 && priority != existing_item[:priority]
+            updates[:default_quantity] = default_quantity if default_quantity > 0 && default_quantity != existing_item[:default_quantity]
+            
+            if updates.any?
+              @db.update_item(prod_id, updates)
+              puts "✅ Updated existing item: #{updates.keys.join(', ')}"
+            end
+            
+            db_item = @db.find_item_by_prod_id(prod_id)
+          else
+            puts "✅ Creating new item: #{prod_id} - #{description}"
+            # Create new item
+            @db.create_item(
+              prod_id: prod_id,
+              url: url,
+              description: description,
+              modifier: modifier.empty? ? nil : modifier,
+              default_quantity: default_quantity,
+              priority: priority
+            )
+            db_item = @db.find_item_by_prod_id(prod_id)
+          end
+        end
+      end
+      
+      # Record purchase if price provided
+      if price && price > 0 && db_item
+        price_cents = (price * 100).to_i
+        @db.record_purchase(
+          prod_id: db_item[:prod_id],
+          quantity: purchase_quantity,
+          price_cents: price_cents
+        )
+        puts "✅ Recorded purchase: #{purchase_quantity}x #{description} @ $#{price}"
+      end
+      
+      # Most importantly: Update the ORIGINAL shopping list item as purchased
+      update_shopping_list_item(original_item_name, 
+        purchased: '✓',
+        itemno: db_item ? db_item[:prod_id] : '',
+        price_paid: price.to_f,
+        quantity_purchased: purchase_quantity.to_i
+      )
+      puts "✅ Updated shopping list item '#{original_item_name}' as purchased"
+      
+    else
+      puts "⚠️ Unexpected response type for shopping list completion: #{parsed_response[:type]}"
+    end
   end
 
   def handle_add_new_item(response_data)
@@ -1009,6 +1109,19 @@ class WalmartGroceryAssistant
         end
       else
         puts "❌ Invalid Walmart product URL captured: #{captured_url}"
+      end
+
+    when 'choice'
+      # Handle "Search Again" button (choice 999) like "search for new item" in multi-choice
+      if parsed_response[:value] == 999
+        puts "🔍 User requested search for alternatives: #{original_shopping_item_name}"
+        
+        # Trigger the same search flow as multi-choice "search for new item"
+        # This will be handled by returning :search_new_item and going back to main process loop
+        return :search_new_item
+      else
+        # Handle other choice responses if any
+        puts "⚠️ Unexpected choice response: #{parsed_response[:value]}"
       end
 
     else

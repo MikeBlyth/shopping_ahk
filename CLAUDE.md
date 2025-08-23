@@ -91,7 +91,17 @@ At the end of any run, even in case of a crash, the sheet must be sync'd with th
 - The last line should be the TOTAL cost of all the items.
 - Previously purchased items (see above) should display just the same as new ones.
 
+## Enhanced item searching in shopping list cycle
 
+The when a list item matches an existing item (single or multiple choice), the app opens that URL and a purchase dialog. However, it could be that the user wants to choose an alternative product. For example, another brand or size. Sometimes there are already priority-ranked alternatives and Ruby selects the highest one, but it may be out of stock or otherwise requiring a lower priority  alternative.
+
+### Solution
+
+- Add a "Search Alt" button to the purchase dialog.
+- Clicking that button will return a SEARCH_ALT command to Ruby.
+- Ruby will look for a lower priority exact match to the item description in the database (not necessarily the one in the shopping list). 
+- If there is such a match, it will send that back to AHK as a new item to open.
+- If there is not a match, it will use the *shopping list* item description and send the command to search for the product, the same way it does when there is a non-matching item in the database.
 
 ## Major Technical Fixes (August 2025)
 
@@ -178,3 +188,5 @@ At the end of any run, even in case of a crash, the sheet must be sync'd with th
   4. The overall effect is that the updated sheet contains the new, sorted item list followed by the shopping list with purchased items marked.
 - ToDO - Log file that can be used to recover from crash
 - Use AHK SendInput and not SendText
+- Be critical and ready to push back on suggestions that may not be optimal. Be critical of yourself as well. Do not praise every idea or change without considering well.
+- Ask if I want to stage with "git add ." before making extensive changes
