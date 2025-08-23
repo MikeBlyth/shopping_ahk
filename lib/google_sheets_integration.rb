@@ -353,8 +353,36 @@ module GoogleSheetsIntegration
       
       shopping_list_data.each do |shopping_item|
         # Format: {✅{qty} | ❌ } | {description} | {total_price = qty*price} | itemid
-        if shopping_item[:price_paid] && shopping_item[:quantity_purchased]
-          # Item was purchased - calculate total price
+        
+        # Check if this item was already purchased in the initial sheet load
+        # (has a checkmark in the 'purchased' field from original sheet)
+        originally_purchased = shopping_item[:purchased] && 
+                              !shopping_item[:purchased].empty? && 
+                              shopping_item[:purchased] != '❌'
+        
+        if originally_purchased
+          # Item was already purchased - keep unchanged, preserve original format
+          # Extract quantity from original purchased display if it contains ✅ with number
+          if shopping_item[:purchased].match(/✅(\d+)/)
+            orig_qty = shopping_item[:purchased].match(/✅(\d+)/)[1].to_i
+            # Try to extract price from modifier field if present
+            if shopping_item[:modifier] && shopping_item[:modifier].match(/\$?([\d.]+)/)
+              orig_price = shopping_item[:modifier].match(/\$?([\d.]+)/)[1].to_f
+              orig_total = orig_qty * orig_price
+              total_cost += orig_total
+              total_price_display = sprintf('%.2f', orig_total)
+            else
+              total_price_display = shopping_item[:modifier] || ''
+            end
+            purchased_display = shopping_item[:purchased]
+          else
+            # Simple checkmark or other format - preserve as is
+            purchased_display = shopping_item[:purchased]
+            total_price_display = shopping_item[:modifier] || ''
+          end
+          item_number = shopping_item[:itemno] || ''
+        elsif shopping_item[:price_paid] && shopping_item[:quantity_purchased]
+          # Item was purchased in current session - calculate total price
           quantity = shopping_item[:quantity_purchased]
           unit_price = shopping_item[:price_paid]
           item_total = quantity * unit_price
@@ -362,14 +390,13 @@ module GoogleSheetsIntegration
           
           purchased_display = "✅#{quantity}"
           total_price_display = sprintf('%.2f', item_total)
+          item_number = shopping_item[:itemno] || ''
         else
           # Item not purchased
           purchased_display = '❌'
           total_price_display = ''
+          item_number = shopping_item[:itemno] || ''
         end
-        
-        # Use captured item number if available
-        item_number = shopping_item[:itemno] || ''
         
         # Build row: purchased_display | description | total_price | itemid | (other cols empty)
         row = [purchased_display, shopping_item[:item], total_price_display, item_number, '', '', '', '']

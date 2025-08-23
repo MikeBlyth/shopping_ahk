@@ -811,11 +811,26 @@ class WalmartGroceryAssistant
           price_cents = (price * 100).to_i
           record_purchase(item_for_purchase, price_cents: price_cents, quantity: purchase_quantity)
           puts "✅ Recorded purchase: #{purchase_quantity}x #{item_for_purchase[:description]} @ $#{price}"
+          
+          # Add to shopping list data for sync display
+          update_shopping_list_item(item_for_purchase[:description], {
+            purchased: '✓',
+            itemno: item_for_purchase[:prod_id],
+            price_paid: price,
+            quantity_purchased: purchase_quantity,
+            url: item_for_purchase[:url] || url
+          })
         rescue StandardError => e
           puts "❌ DEBUG: Purchase recording failed: #{e.message}"
         end
       else
         puts "✅ Item processed without purchase (no price provided)"
+        
+        # Add to shopping list data without purchase info  
+        update_shopping_list_item(item_for_purchase[:description], {
+          itemno: item_for_purchase[:prod_id],
+          url: item_for_purchase[:url] || url
+        })
       end
       
       return item_for_purchase
@@ -852,8 +867,25 @@ class WalmartGroceryAssistant
         
         record_purchase(new_item, price_cents: price_cents, quantity: purchase_quantity)
         puts "✅ Recorded purchase: #{purchase_quantity}x #{description} @ $#{price}"
+        
+        # Add to shopping list data for sync display
+        update_shopping_list_item(description, {
+          purchased: '✓',
+          itemno: prod_id,
+          price_paid: price,
+          quantity_purchased: purchase_quantity,
+          modifier: modifier,
+          url: url
+        })
       else
         puts "✅ Item added without purchase (no price provided)"
+        
+        # Add to shopping list data without purchase info
+        update_shopping_list_item(description, {
+          itemno: prod_id,
+          modifier: modifier,
+          url: url
+        })
       end
       
       return {
@@ -1039,19 +1071,41 @@ class WalmartGroceryAssistant
   end
 
   def update_shopping_list_item(item_name, updates = {})
-    return unless @shopping_list_data
+    # Initialize @shopping_list_data if it doesn't exist
+    @shopping_list_data ||= []
 
-    # Find and update the shopping list item
-    @shopping_list_data.each do |shopping_item|
-      if shopping_item[:item].downcase == item_name.downcase
-        updates.each do |key, value|
-          shopping_item[key] = value
-        end
-        puts "✅ Updated shopping item: #{item_name} with #{updates.keys.join(', ')}"
-        break
+    # Find existing shopping list item
+    shopping_item = @shopping_list_data.find { |item| item[:item].downcase == item_name.downcase }
+    
+    if shopping_item
+      # Update existing item
+      updates.each do |key, value|
+        shopping_item[key] = value
       end
+      puts "✅ Updated shopping item: #{item_name} with #{updates.keys.join(', ')}"
+    else
+      # Create new blank shopping list item, then update it
+      new_shopping_item = {
+        purchased: '',
+        item: item_name,
+        modifier: '',
+        priority: 1,
+        quantity: 1,
+        last_purchased: '',
+        itemno: '',
+        url: ''
+      }
+      
+      # Apply updates to the new item
+      updates.each do |key, value|
+        new_shopping_item[key] = value
+      end
+      
+      @shopping_list_data << new_shopping_item
+      puts "✅ Created new shopping item: #{item_name} with #{updates.keys.join(', ')}"
     end
   end
+
 
 
   def wait_for_ahk_shutdown
