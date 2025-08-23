@@ -354,12 +354,11 @@ module GoogleSheetsIntegration
       shopping_list_data.each do |shopping_item|
         # Format: {✅{qty} | ❌ } | {description} | {total_price = qty*price} | itemid
         
-        if shopping_item[:price_paid] && shopping_item[:quantity_purchased]
+        if shopping_item[:price_paid] && shopping_item[:price_paid] > 0 && shopping_item[:quantity_purchased] && shopping_item[:quantity_purchased] > 0
           # Item was purchased in current session - calculate total price
           quantity = shopping_item[:quantity_purchased]
           unit_price = shopping_item[:price_paid]
           item_total = quantity * unit_price
-          total_cost += item_total
           
           purchased_display = "✅#{quantity}"
           total_price_display = sprintf('%.2f', item_total)
@@ -369,6 +368,20 @@ module GoogleSheetsIntegration
           total_price_display = shopping_item[:modifier] || ''
         end
         
+        # Add to total cost if item has a price (regardless of when it was purchased)
+        item_price = 0.0
+        
+        if shopping_item[:price] && shopping_item[:price] > 0
+          # Newly purchased items have :price field
+          item_price = shopping_item[:price]
+        elsif (shopping_item[:purchased] == '✅' || shopping_item[:purchased]&.start_with?('✅')) && 
+              shopping_item[:modifier] && shopping_item[:modifier].match(/^\d+\.?\d*$/)
+          # Previously purchased items have price in :modifier field
+          item_price = shopping_item[:modifier].to_f
+        end
+        
+        total_cost += item_price if item_price > 0
+        
         item_number = shopping_item[:itemno] || ''
         
         # Build row: purchased_display | description | total_price | itemid | (other cols empty)
@@ -377,11 +390,9 @@ module GoogleSheetsIntegration
         all_rows << row
       end
       
-      # 6. Add TOTAL row as last item
-      if total_cost > 0
-        total_row = ['TOTAL', '', sprintf('%.2f', total_cost), '', '', '', '', '']
-        all_rows << total_row
-      end
+      # 6. Add TOTAL row as last item (always show, even if $0.00)
+      total_row = ['TOTAL', '', sprintf('%.2f', total_cost), '', '', '', '', '']
+      all_rows << total_row
 
       # Clear entire sheet and rewrite
       begin
@@ -403,6 +414,34 @@ module GoogleSheetsIntegration
             value_range,
             value_input_option: 'RAW'
           )
+
+          # Make TOTAL row bold
+          total_row_index = all_rows.length  # Last row (1-indexed)
+          bold_request = {
+            repeat_cell: {
+              range: {
+                sheet_id: 0,  # Assuming first sheet
+                start_row_index: total_row_index - 1,  # Convert to 0-indexed
+                end_row_index: total_row_index,
+                start_column_index: 0,
+                end_column_index: 8
+              },
+              cell: {
+                user_entered_format: {
+                  text_format: {
+                    bold: true
+                  }
+                }
+              },
+              fields: 'userEnteredFormat.textFormat.bold'
+            }
+          }
+
+          batch_request = Google::Apis::SheetsV4::BatchUpdateSpreadsheetRequest.new(
+            requests: [bold_request]
+          )
+
+          @service.batch_update_spreadsheet(SHEET_ID, batch_request)
         end
 
         puts "✅ Rewrote entire sheet: #{db_items.length} products, #{shopping_list_data.length} shopping items"

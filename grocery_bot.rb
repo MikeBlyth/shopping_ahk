@@ -108,6 +108,8 @@ class WalmartGroceryAssistant
       if @shopping_list_data && !@shopping_list_data.empty? && @sheets_sync
         puts "📊 Performing emergency sheet sync before exit..."
         begin
+          puts "🔍 DEBUG: About to sync @shopping_list_data (#{@shopping_list_data.length} items)"
+          puts "🔍 DEBUG: First few items: #{@shopping_list_data.first(2).inspect}"
           result = @sheets_sync.sync_from_database(@db, @shopping_list_data)
           puts "✅ Emergency sync complete: #{result[:products]} products, #{result[:shopping_items]} shopping items"
         rescue StandardError => e
@@ -229,6 +231,7 @@ class WalmartGroceryAssistant
       end
       
       # Store deduplicated shopping list for later rewriting
+      puts "🔍 DEBUG: Setting @shopping_list_data to unique_shopping_items (#{unique_shopping_items.length} items)"
       @shopping_list_data = unique_shopping_items
       
       # Process only items with quantity != 0 AND no purchase mark
@@ -490,6 +493,21 @@ class WalmartGroceryAssistant
     puts "🔍 DEBUG: Completing shopping list item '#{original_item_name}' with response: #{response_data}"
     
     parsed_response = parse_response(response_data)
+    puts "🔍 DEBUG: Parsed response type: '#{parsed_response[:type]}', value: '#{parsed_response[:value]}'"
+    
+    # Check for skip first, before processing purchase data
+    if parsed_response[:type] == 'status' && parsed_response[:value] == 'skipped'
+      puts "🔍 DEBUG: SKIP DETECTED - handling skip immediately"
+      # User clicked "Skip Item" - mark with red X
+      update_shopping_list_item(original_item_name, 
+        purchased: '❌',  # Red X for skipped items
+        itemno: '',
+        price_paid: 0.0,
+        quantity_purchased: 0
+      )
+      puts "⏭️ Shopping list item '#{original_item_name}' marked as skipped"
+      return
+    end
     
     case parsed_response[:type]
     when 'add_and_purchase'
@@ -561,6 +579,7 @@ class WalmartGroceryAssistant
         quantity_purchased: purchase_quantity.to_i
       )
       puts "✅ Updated shopping list item '#{original_item_name}' as purchased"
+
       
     else
       puts "⚠️ Unexpected response type for shopping list completion: #{parsed_response[:type]}"
@@ -1124,6 +1143,19 @@ class WalmartGroceryAssistant
         puts "⚠️ Unexpected choice response: #{parsed_response[:value]}"
       end
 
+    when 'status'
+      # Handle status responses like 'skipped' from skip button
+      if parsed_response[:value] == 'skipped'
+        # User clicked "Skip Item" - mark with red X
+        update_shopping_list_item(original_shopping_item_name, 
+          purchased: '❌',  # Red X for skipped items
+          itemno: db_item ? db_item[:prod_id] : '',
+          price_paid: 0.0,
+          quantity_purchased: 0
+        )
+        puts "⏭️ Item '#{original_shopping_item_name}' marked as skipped"
+      end
+
     else
       # Just continue - no purchase to record
     end
@@ -1199,6 +1231,9 @@ class WalmartGroceryAssistant
   end
 
   def update_shopping_list_item(item_name, updates = {})
+    puts "🔍 DEBUG: update_shopping_list_item called for '#{item_name}' with updates: #{updates.inspect}"
+    puts "🔍 DEBUG: Caller: #{caller[0]}"
+    
     # Initialize @shopping_list_data if it doesn't exist
     @shopping_list_data ||= []
 
@@ -1211,6 +1246,7 @@ class WalmartGroceryAssistant
         shopping_item[key] = value
       end
       puts "✅ Updated shopping item: #{item_name} with #{updates.keys.join(', ')}"
+      puts "🔍 DEBUG: After update, shopping_item[:purchased] = '#{shopping_item[:purchased]}'"
     else
       # Create new blank shopping list item, then update it
       new_shopping_item = {

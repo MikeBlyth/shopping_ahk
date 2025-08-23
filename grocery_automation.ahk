@@ -139,13 +139,7 @@ OpenURL(url) {
     ; Go to address bar and navigate
     WinActivate(TargetWindowHandle)
     WinWaitActive(TargetWindowHandle)
-    Send("^l")  ; Ctrl+L to focus address bar
-    Sleep(100)
-    Send("^a")  ; Select all
-    Sleep(100)
-    Send(url)
-    Sleep(100)
-    Send("{Enter}")
+    PasteURL(url)
     
     ; Wait briefly for page to start loading
     Sleep(800)
@@ -154,24 +148,36 @@ OpenURL(url) {
     WriteStatus("COMPLETED")
 }
 
+PasteURL(url) {
+    ; Paste URL into address bar without navigating
+    Send("^l")  ; Ctrl+L to focus address bar
+    Sleep(100)
+    Send("^a")  ; Select all
+    Sleep(100)
+    ; Save the current clipboard content to a variable
+    currentClipboard := A_Clipboard
+    ; Put your URL into the clipboard
+    A_Clipboard := url
+    ; Send the paste command (Ctrl+V)
+    Send "^v"
+    Send("{Enter}")
+    ; Optional: Restore the original clipboard content after a brief delay
+    Sleep 50
+    A_Clipboard := currentClipboard
+    Sleep(100)
+}
+
 SearchWalmart(searchTerm) {
-    ; Update status to show what user should do
-    ShowPersistentStatus("Search results shown - find your item, then press Ctrl+Shift+A")
+    ; Update status to show what user should do with urgent styling
+    ShowPersistentStatus("Search results shown - find your item, then press Ctrl+Shift+A", true)
     
     ; Build search URL
     searchURL := "https://www.walmart.com/search?q=" . UriEncode(searchTerm)
     
     ; Go to address bar and search
-    Send("^l")  ; Ctrl+L to focus address bar
-    Sleep(100)
-    Send("^a")  ; Select all
-    Sleep(100)
-    SendInput(searchURL)
-    Sleep(100)
-    Send("{Enter}")
-    
+    PasteURL(searchURL)
     ; Wait for search results
-    Sleep(3000)
+    Sleep(2000)
     
     ; Don't wait for user here - let the next command (SHOW_ITEM_PROMPT) handle user interaction
     WriteStatus("COMPLETED")
@@ -324,7 +330,7 @@ SkipClickHandler(gui) {
     if !gui.is_known {
         GetCurrentURLAndRespond("save_url_only")
     } else {
-        WriteResponse("continue")
+        WriteResponse("skipped")
     }
     
     WriteStatus("COMPLETED")
@@ -743,7 +749,7 @@ CancelItemClickHandler(gui) {
 }
 
 ; Create a persistent status window
-ShowPersistentStatus(message) {
+ShowPersistentStatus(message, isUrgent := false) {
     global StatusGui
     
     ; Close existing status window if any
@@ -753,12 +759,24 @@ ShowPersistentStatus(message) {
         }
     }
     
-    ; Create a new status GUI with standard styling
+    ; Create a new status GUI with styling based on urgency
     StatusGui := Gui("+AlwaysOnTop", "Assistant Status")
     StatusGui.SetFont("s10")
     
+    ; Set background color based on urgency
+    if isUrgent {
+        ; Urgent: Orange/amber background for "pay attention"
+        StatusGui.BackColor := 0xFFA500  ; Orange
+        textColor := 0x000000  ; Black text for contrast
+    } else {
+        ; Normal: Default system colors (no custom background)
+        ; StatusGui will use default window background
+        textColor := 0x000000  ; Black text (default)
+    }
+    
     ; Add status text (taller to accommodate more text)
     statusText := StatusGui.Add("Text", "x20 y15 w400 h140 Center", message)
+    statusText.Opt("+c" . Format("{:06x}", textColor))  ; Set text color
     
     ; Add Quit button
     quitButton := StatusGui.Add("Button", "x180 y60 w80 h30", "Quit")
