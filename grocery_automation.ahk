@@ -32,7 +32,7 @@ try {
 ; Show initial status
 ShowPersistentStatus("Assistant ready - select browser window and click OK to start")
 
-MsgBox("AutoHotkey ready!`n`nPlease select your browser window with Walmart.com open and click OK to start.", "Walmart Assistant", "OK")
+MsgBox("AutoHotkey ready!`n`nPlease select your browser window with Walmart.com open and click OK to start.", "Walmart Assistant", 0x40000)
 
 ; Auto-start after initial dialog closes
 UserReady := true
@@ -45,7 +45,7 @@ if !TargetWindowHandle {
 }
 
 ; Update status for shopping mode
-ShowPersistentStatus("Assistant processing shopping list, press Ctrl+Shift+Q to quit")
+ShowPersistentStatus("Processing shopping list")
 
 ; Hotkey to signal readiness (still available for manual restart if needed)
 ^+r::{
@@ -65,7 +65,7 @@ ShowPersistentStatus("Assistant processing shopping list, press Ctrl+Shift+Q to 
         }
         
         ; Update status for shopping mode
-        ShowPersistentStatus("Assistant processing shopping list, press Ctrl+Shift+Q to quit")
+        ShowPersistentStatus("Processing shopping list")
     }
 }
 
@@ -572,7 +572,7 @@ ProcessSessionComplete() {
     FileAppend("ProcessSessionComplete called - setting completion tooltip`n", "command_debug.txt")
     WriteResponse("session_reset")
     WriteStatus("WAITING_FOR_HOTKEY")
-    ShowPersistentStatus("Shopping list complete! Press Ctrl+Shift+A to add or purchase item, Ctrl+Shift+Q to quit")
+    ShowPersistentStatus("Shopping list complete! Press Ctrl+Shift+A to add or purchase item")
     ResetForNextSession()
 }
 
@@ -580,19 +580,7 @@ ProcessSessionComplete() {
 ; Hotkeys
 ^+q::{
     ; Clean exit - signal Ruby and shutdown
-    global StatusGui
-    
-    ; Close status window
-    if StatusGui != "" {
-        try {
-            StatusGui.Destroy()
-        }
-    }
-    
-    WriteResponse("quit")  ; Tell Ruby we're quitting
-    WriteStatus("SHUTDOWN")
-    MsgBox("AutoHotkey script shutting down...", "Walmart Assistant", "OK")
-    ExitApp()
+    PerformQuit()
 }
 
 ^+a::{
@@ -814,17 +802,37 @@ ShowPersistentStatus(message) {
         }
     }
     
-    ; Create a new status GUI with styling
-    StatusGui := Gui("+AlwaysOnTop +LastFound -MaximizeBox -MinimizeBox +Resize", "Assistant Status")
-    StatusGui.BackColor := "0x2D3748"  ; Dark blue-gray background
-    StatusGui.SetFont("s12 Bold", "Segoe UI")
+    ; Create a new status GUI with standard styling
+    StatusGui := Gui("+AlwaysOnTop", "Assistant Status")
+    StatusGui.SetFont("s10")
     
-    ; Add status text with light color
-    statusText := StatusGui.Add("Text", "x20 y15 w400 h60 c0xF7FAFC Center", message)
+    ; Add status text (taller to accommodate more text)
+    statusText := StatusGui.Add("Text", "x20 y15 w400 h140 Center", message)
     
-    ; Position in top-right corner with more margin (100px further left)
-    StatusGui.Show("x" . (A_ScreenWidth - 900) . " y20 w440 h90 NoActivate")
+    ; Add Quit button
+    quitButton := StatusGui.Add("Button", "x180 y60 w80 h30", "Quit")
+    quitButton.OnEvent("Click", (*) => PerformQuit())
+    
+    ; Position in top-right corner with more margin (100px taller)
+    StatusGui.Show("x" . (A_ScreenWidth - 900) . " y80 w440 h120 NoActivate")
     
     ; Make it stay on top but not steal focus
     WinSetAlwaysOnTop(1, StatusGui.Hwnd)
+}
+
+; Shared quit functionality
+PerformQuit() {
+    global StatusGui
+    
+    ; Close status window
+    if StatusGui != "" {
+        try {
+            StatusGui.Destroy()
+        }
+    }
+    
+    WriteResponse("quit")  ; Tell Ruby we're quitting
+    WriteStatus("SHUTDOWN")
+    MsgBox("AutoHotkey script shutting down...", "Walmart Assistant", "OK")
+    ExitApp()
 }
