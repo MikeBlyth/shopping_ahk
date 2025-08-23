@@ -1,6 +1,7 @@
 require 'uri'
 require 'csv'
 require 'json'
+require 'set'
 require 'colorize'
 require 'dotenv/load'
 require_relative 'lib/google_sheets_integration'
@@ -221,8 +222,21 @@ class WalmartGroceryAssistant
       # Store shopping list for later rewriting (keep all items, not just ones to order)
       @shopping_list_data = shopping_items
 
-      # Return just the item names for processing
-      items_to_order.map { |item| item[:item] }
+      # Remove duplicates from items to order (case-insensitive)
+      unique_items = []
+      seen_items = Set.new
+      
+      items_to_order.each do |item|
+        normalized_name = item[:item].strip.downcase
+        unless seen_items.include?(normalized_name)
+          unique_items << item[:item]
+          seen_items << normalized_name
+        else
+          puts "⚠️  Skipping duplicate item: #{item[:item]}"
+        end
+      end
+
+      unique_items
     else
       # Fallback if sheets not available
       @shopping_list_data = []

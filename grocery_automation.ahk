@@ -27,11 +27,24 @@ try {
 }
 
 ; Show initial status
-ShowPersistentStatus("Assistant ready - waiting for Ctrl+Shift+R to start shopping list, press Ctrl+Shift+Q to quit")
+ShowPersistentStatus("Assistant ready - select browser window and click OK to start")
 
-MsgBox("AutoHotkey ready!`n`nInstructions:`n1. Start ruby grocery_bot.rb`n2. Open/switch to your Walmart page`n3. Press Ctrl+Shift+R when ready", "Walmart Assistant", "OK")
+MsgBox("AutoHotkey ready!`n`nPlease select your browser window with Walmart.com open and click OK to start.", "Walmart Assistant", "OK")
 
-; Hotkey to signal readiness
+; Auto-start after initial dialog closes
+UserReady := true
+WriteStatus("READY")
+TargetWindowHandle := WinExist("A")
+
+if !TargetWindowHandle {
+    MsgBox("Could not find an active window handle.")
+    ExitApp
+}
+
+; Update status for shopping mode
+ShowPersistentStatus("Assistant processing shopping list, press Ctrl+Shift+Q to quit")
+
+; Hotkey to signal readiness (still available for manual restart if needed)
 ^+r::{
     global UserReady, WaitingForUser, TargetWindowHandle
     
@@ -48,9 +61,7 @@ MsgBox("AutoHotkey ready!`n`nInstructions:`n1. Start ruby grocery_bot.rb`n2. Ope
             ExitApp
         }
         
-        MsgBox("Ready signal received!", "Test Script", "OK")
-        
-        ; Update status for shopping mode after dialog closes
+        ; Update status for shopping mode
         ShowPersistentStatus("Assistant processing shopping list, press Ctrl+Shift+Q to quit")
     }
 }
@@ -157,12 +168,12 @@ OpenURL(url) {
     Sleep(100)
     Send("^a")  ; Select all
     Sleep(100)
-    SendText(url)
+    SendInput(url)
     Sleep(100)
     Send("{Enter}")
     
-    ; Wait a moment for page to start loading
-    Sleep(2000)
+    ; Wait briefly for page to start loading
+    Sleep(800)
     
     ; Don't wait for user here - let the next command (SHOW_ITEM_PROMPT) handle user interaction
     WriteStatus("COMPLETED")
@@ -177,7 +188,7 @@ SearchWalmart(searchTerm) {
     Sleep(100)
     Send("^a")  ; Select all
     Sleep(100)
-    SendText(searchURL)
+    SendInput(searchURL)
     Sleep(100)
     Send("{Enter}")
     
