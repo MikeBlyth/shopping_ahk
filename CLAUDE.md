@@ -74,6 +74,25 @@
 - `.env` - Database credentials and Google Sheets ID
 - `google_credentials.json` - Google API service account key
 
+## Sync from Database to Sheet
+
+At the end of any run, even in case of a crash, the sheet must be sync'd with the database.
+
+### Iterating Through The shopping list
+- The shopping list @shopping_list_data contains the current state of all the items in the list. 
+- When an item is purchased, add the itemid, quantity, and price to the @shopping_list_data record.
+- Items that already have checkmark from the initial load (i.e. already purchased) should be kept unchanged. Do not mark them as skipped (red x) since they're already purchased. 
+- After traversing the shopping list, the user may add other items to purchase. These must be added to the @shopping_list_data and display on sync_from_database
+### Shopping List Display
+- The format of the display for each item should be
+
+{✅{qty} | ❌ } | {description} | {total_price = qty*price} | itemid 
+
+- The last line should be the TOTAL cost of all the items.
+- Previously purchased items (see above) should display just the same as new ones.
+
+
+
 ## Major Technical Fixes (August 2025)
 
 ### Ctrl+Shift+A Item Addition - RESOLVED ✅
