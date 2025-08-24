@@ -223,6 +223,7 @@ The system now operates with just **two user hotkeys**:
 - ToDO - Log file that can be used to recover from crash
 - Be critical and ready to push back on suggestions that may not be optimal. Be critical of yourself as well. Do not praise every idea or change without considering well.
 - Ask if I want to stage with "git add ." before making extensive changes
+- AHK is always v2
 
 ## Current Development
 
