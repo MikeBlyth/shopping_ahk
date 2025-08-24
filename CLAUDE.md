@@ -191,10 +191,7 @@ The system now operates with just **two user hotkeys**:
 - **Improved**: Status messages clearly show required actions at each step
 - **Benefit**: Simpler user experience with just two hotkeys to remember
 
-## Next Steps if Continued
-- Push git repository to GitHub (need to create `shopping_ahk` repo first)
-- Monitor purchase history accumulation over time
-- Consider any additional automation features
+
 
 ## Item Matching Rules
 - **No 1:1 mapping**: Multiple database items can match a single sheet description
@@ -210,17 +207,42 @@ The system now operates with just **two user hotkeys**:
 - Text file communication is intentionally simple and reliable
 - System builds database of known products over time regardless of purchases
 
-# NEW DATA SHEET FLOW
-- The sheet will have two sections: product-list and shopping-list. The sheet begins with the product list.  The beginning of the shopping list will be denoted by "Shopping List" in the first column (Purchased column)
+## DATA SHEET FLOW
+- The sheet has two sections: product-list and shopping-list. The sheet begins with the product list.  The beginning of the shopping list is denoted by "Shopping List" in the first column (Purchased column)
 - The product list is unchanged except that the quantity should now be ignored. The list is only used for managing the items table.
-- The subsequent Shopping List section will not sync with the database but needs to be remembered for rewriting to the sheet. The app will process the items in the shopping list exactly as it has previously done: find the item, navigate to it, open the AHK dialog etc.
-- The existing logic I think is thus unchanged except: when in product list, do not test for purchase using the quantity, so will never navigate to thoses pages; when in shopping list, remember the row contents for rewriting. 
+- The subsequent Shopping List section does not sync with the database but needs to be remembered for rewriting to the sheet. The app will process the items in the shopping list exactly as it has previously done: find the item, navigate to it, open the AHK dialog etc.
 - Sync to Sheet:
   1. Clear the sheet
   2. Rewrite the sorted item (product) table which may now be longer than the original
   3. Write a blank line, then the "Shopping list" delimiter in col 1, then the items in the shopping list, which should now have checkmarks for items purchased.
   4. The overall effect is that the updated sheet contains the new, sorted item list followed by the shopping list with purchased items marked.
+
+## Important User-generated Notes to Claude: -- Do Not Make Changes Beyond This Point
+
+- The system is working well. Important: Do not make significant changes to structure without asking user. Do not make miscellaneous changes without being instructed to do so, but do suggest them if they seem to be a good idea. 
 - ToDO - Log file that can be used to recover from crash
-- Use AHK SendInput and not SendText
 - Be critical and ready to push back on suggestions that may not be optimal. Be critical of yourself as well. Do not praise every idea or change without considering well.
 - Ask if I want to stage with "git add ." before making extensive changes
+
+## Current Development
+
+### Purchase detection
+
+I want to add the ability for the app to detect when the user has purchased a product by clicking the add to cart button. Otherwise, I could click the "Add Purchase" button in the app but forget to do so in the online store.
+
+This involves
+- Detect the button position by image search. The image to match is ./images/add_to_cart.png
+- The search range for that image is 
+    x: 75% to 90% of width
+    y: 20% to 80% of height
+- Color tolerance is 10
+
+Flow
+
+- When navigating to a page, the purchase dialog will be shown as usual, but without the "Add & Purchase" button. A prompt in the dialog will remind the user to click "Add to Cart" or skip.
+- AHK will find add_to_cart.png
+- The button region will be defined as that point (upper-left) to the (x: right edge of screen, y: upper y + 100 pixels)
+- AHK will then monitor for a click in that region/
+- When a click is detected, the "Add & Purchase" button will be added to the dialog.
+
+In this way, the user can't "purchase" an item in the app until they click the shop's add_to_cart button.
