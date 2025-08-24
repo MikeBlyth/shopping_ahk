@@ -1,8 +1,9 @@
 ; Walmart Grocery Automation
 ; Uses Ctrl+Shift+A to add items and Ctrl+Shift+Q to quit
 
-; Include JSON library
+; Include JSON library and image search function
 #Include lib/jsongo.v2.ahk
+#Include lib/image_search_function.ahk
 
 ; Use fast typing of URL 
 SendMode "Input"
@@ -16,8 +17,19 @@ ResponseFile := ScriptDir . "\ahk_response.txt"
 ; Global variables
 UserReady := false
 StatusGui := ""
+; Purchase detection variables
+ButtonRegion := {left: 0, top: 0, right: 0, bottom: 0}
+ButtonFound := false
+CurrentPurchaseButton := ""
 
-; Initialize
+; Initialize - clear any leftover files from previous session
+try {
+    FileDelete(CommandFile)
+    FileDelete(ResponseFile)
+} catch {
+    ; Ignore errors if files don't exist
+}
+
 WriteStatus("WAITING_FOR_HOTKEY")
 
 ; Clear debug log at startup
@@ -267,8 +279,8 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     purchaseGui.Add("Text", "xm y+10", "Quantity:")
     quantityEdit := purchaseGui.Add("Edit", "w150 r1", default_quantity)
     
-    ; Buttons
-    addButton := purchaseGui.Add("Button", "xm y+20 w100 h30", "Record Purchase")
+    ; Buttons - Override button starts as warning state
+    addButton := purchaseGui.Add("Button", "xm y+20 w120 h30 BackgroundRed cWhite", "⚠️ Override")
     skipButton := purchaseGui.Add("Button", "x+10 w100 h30", "Skip Item")
     searchButton := purchaseGui.Add("Button", "x+10 w100 h30", "Search Again")
     
@@ -283,9 +295,15 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     skipButton.OnEvent("Click", (*) => SkipClickHandler(purchaseGui))
     searchButton.OnEvent("Click", (*) => SearchAgainClickHandler(purchaseGui))
     
+    ; Store purchase button reference globally for click detection
+    global CurrentPurchaseButton := addButton
+    
     ; Show dialog
     purchaseGui.Show()
     WriteStatus("WAITING_FOR_INPUT")
+    
+    ; Start purchase detection with delay for page loading
+    SetTimer(() => StartPurchaseDetection(), 2000)  ; 2 second delay
 }
 
 ; Event handler functions for Purchase dialog
@@ -600,8 +618,8 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     addItemGui.Add("Text", "xm y+15", "URL (auto-captured):")
     urlEdit := addItemGui.Add("Edit", "w400 r2 ReadOnly", currentUrl)
     
-    ; Buttons
-    addButton := addItemGui.Add("Button", "xm y+15 w120 h30", "Add & Purchase")
+    ; Buttons - Override button starts as warning state
+    addButton := addItemGui.Add("Button", "xm y+15 w120 h30 BackgroundRed cWhite", "⚠️ Override")
     addOnlyButton := addItemGui.Add("Button", "x+10 w100 h30", "Add Only")
     cancelButton := addItemGui.Add("Button", "x+10 w100 h30", "Cancel")
     
@@ -619,9 +637,15 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     addOnlyButton.OnEvent("Click", (*) => AddOnlyClickHandler(addItemGui))
     cancelButton.OnEvent("Click", (*) => CancelItemClickHandler(addItemGui))
     
+    ; Store purchase button reference globally for click detection
+    global CurrentPurchaseButton := addButton
+    
     ; Show dialog
     addItemGui.Show()
     WriteStatus("WAITING_FOR_INPUT")
+    
+    ; Start purchase detection with delay for page loading
+    SetTimer(() => StartPurchaseDetection(), 2000)  ; 2 second delay
 }
 
 ; Event handler functions for Add Item dialog
@@ -804,4 +828,43 @@ PerformQuit() {
     WriteStatus("SHUTDOWN")
     MsgBox("AutoHotkey script shutting down...", "Walmart Assistant", "OK")
     ExitApp()
+}
+
+; Purchase Detection Functions
+StartPurchaseDetection() {
+    global ButtonRegion, ButtonFound
+    
+    ; Search for Add to Cart button on page
+    result := FindAddToCartButton(3000)  ; 3 second search
+    
+    if (result.found) {
+        ButtonRegion := result.clickRegion
+        ButtonFound := true
+    } else {
+        ButtonFound := false
+    }
+}
+
+; Global click handler for purchase detection
+~LButton:: {
+    global ButtonRegion, ButtonFound, CurrentPurchaseButton
+    
+    if (!ButtonFound || !CurrentPurchaseButton)
+        return
+    
+    ; Get click position
+    CoordMode("Mouse", "Screen")
+    MouseGetPos(&mouseX, &mouseY)
+    
+    ; Check if click is in Add to Cart button region
+    if (mouseX >= ButtonRegion.left && mouseX <= ButtonRegion.right && 
+        mouseY >= ButtonRegion.top && mouseY <= ButtonRegion.bottom) {
+        
+        ; Change button to Add & Purchase state
+        CurrentPurchaseButton.Text := "✅ Add & Purchase"
+        CurrentPurchaseButton.Opt("BackgroundGreen cWhite")
+        
+        ; Stop monitoring this page
+        ButtonFound := false
+    }
 }
