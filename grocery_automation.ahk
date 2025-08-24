@@ -320,9 +320,15 @@ PurchaseClickHandler(gui) {
     if price = "" || price = "0" || price = "0.00" {
         ; No purchase, but for new items, still capture URL
         if !gui.is_known {
-            GetCurrentURLAndRespond("save_url_only")
+            current_url := GetCurrentURLSilent()
+            response_obj := Map()
+            response_obj["type"] := "save_url_only"
+            response_obj["url"] := current_url
+            WriteResponseJSON(response_obj)
         } else {
-            WriteResponse("continue")
+            response_obj := Map()
+            response_obj["type"] := "continue"
+            WriteResponseJSON(response_obj)
         }
     } else {
         ; Valid price entered - record purchase
@@ -331,12 +337,21 @@ PurchaseClickHandler(gui) {
             return
         }
         
-        ; For new items, also capture the URL
+        ; Create JSON response for purchase
+        response_obj := Map()
         if !gui.is_known {
-            GetCurrentURLAndRespond("purchase_new|" . price . "|" . quantity)
+            ; For new items, also capture the URL
+            current_url := GetCurrentURLSilent()
+            response_obj["type"] := "purchase_new"
+            response_obj["price"] := Float(price)
+            response_obj["quantity"] := Integer(quantity)
+            response_obj["url"] := current_url
         } else {
-            WriteResponse("purchase|" . price . "|" . quantity)
+            response_obj["type"] := "purchase"
+            response_obj["price"] := Float(price)
+            response_obj["quantity"] := Integer(quantity)
         }
+        WriteResponseJSON(response_obj)
     }
     
     WriteStatus("COMPLETED")
@@ -345,11 +360,15 @@ PurchaseClickHandler(gui) {
 
 SkipClickHandler(gui) {
     ; Skip purchase, but for new items, still capture URL
+    response_obj := Map()
     if !gui.is_known {
-        GetCurrentURLAndRespond("save_url_only")
+        current_url := GetCurrentURLSilent()
+        response_obj["type"] := "save_url_only"
+        response_obj["url"] := current_url
     } else {
-        WriteResponse("skipped")
+        response_obj["type"] := "skipped"
     }
+    WriteResponseJSON(response_obj)
     
     WriteStatus("COMPLETED")
     gui.Destroy()
@@ -357,7 +376,10 @@ SkipClickHandler(gui) {
 
 SearchAgainClickHandler(gui) {
     ; User wants to search for alternatives - return like selecting "search for new item" in multi-choice
-    WriteResponse("choice|999")  ; Use high number to indicate "search for new item" option
+    response_obj := Map()
+    response_obj["type"] := "choice"
+    response_obj["choice_index"] := 999  ; Use high number to indicate "search for new item" option
+    WriteResponseJSON(response_obj)
     WriteStatus("COMPLETED")
     gui.Destroy()
 }
@@ -455,6 +477,54 @@ WriteStatus(status) {
     }
 }
 
+WriteResponseJSON(response_obj) {
+    try {
+        ; Convert to JSON and write to file - using manual JSON to avoid jsongo bugs
+        try {
+            json_response := jsongo.Stringify(response_obj)
+            ; Check if JSON is properly formatted (should start with { and have quoted properties)
+            if (!InStr(json_response, '{"') && InStr(json_response, '{')) {
+                ; jsongo generated malformed JSON, use manual approach
+                throw Error("jsongo malformed output")
+            }
+        } catch {
+            ; Manual JSON generation as fallback
+            json_parts := []
+            for key, value in response_obj {
+                if (IsObject(value)) {
+                    ; Handle arrays
+                    if (value.Has(1)) {
+                        array_items := []
+                        for item in value {
+                            array_items.Push('"' . StrReplace(StrReplace(String(item), '\', '\\'), '"', '\"') . '"')
+                        }
+                        json_parts.Push('"' . key . '": [' . array_items.Join(', ') . ']')
+                    }
+                } else {
+                    ; Handle strings and numbers
+                    if (IsNumber(value)) {
+                        json_parts.Push('"' . key . '": ' . value)
+                    } else {
+                        json_parts.Push('"' . key . '": "' . StrReplace(StrReplace(String(value), '\', '\\'), '"', '\"') . '"')
+                    }
+                }
+            }
+            json_response := '{' . json_parts.Join(', ') . '}'
+        }
+        
+        if FileExist(ResponseFile)
+            FileDelete(ResponseFile)
+        FileAppend(json_response, ResponseFile)
+        ToolTip("DEBUG: Wrote JSON response: " . SubStr(json_response, 1, 50) . "...", 400, 50)
+        SetTimer(() => ToolTip("", 400, 50), -2000)
+    } catch as e {
+        ; Fallback to simple text if JSON conversion fails
+        if FileExist(ResponseFile)
+            FileDelete(ResponseFile)
+        FileAppend("ERROR: " . e.message, ResponseFile)
+    }
+}
+
 WriteResponse(response) {
     try {
         ; Convert all responses to JSON format for consistency
@@ -507,8 +577,38 @@ WriteResponse(response) {
             response_obj["value"] := response
         }
         
-        ; Convert to JSON and write to file
-        json_response := jsongo.Stringify(response_obj)
+        ; Convert to JSON and write to file - using manual JSON to avoid jsongo bugs
+        try {
+            json_response := jsongo.Stringify(response_obj)
+            ; Check if JSON is properly formatted (should start with { and have quoted properties)
+            if (!InStr(json_response, '{"') && InStr(json_response, '{')) {
+                ; jsongo generated malformed JSON, use manual approach
+                throw Error("jsongo malformed output")
+            }
+        } catch {
+            ; Manual JSON generation as fallback
+            json_parts := []
+            for key, value in response_obj {
+                if (IsObject(value)) {
+                    ; Handle arrays
+                    if (value.Has(1)) {
+                        array_items := []
+                        for item in value {
+                            array_items.Push('"' . StrReplace(StrReplace(String(item), '\', '\\'), '"', '\"') . '"')
+                        }
+                        json_parts.Push('"' . key . '": [' . array_items.Join(', ') . ']')
+                    }
+                } else {
+                    ; Handle strings and numbers
+                    if (IsNumber(value)) {
+                        json_parts.Push('"' . key . '": ' . value)
+                    } else {
+                        json_parts.Push('"' . key . '": "' . StrReplace(StrReplace(String(value), '\', '\\'), '"', '\"') . '"')
+                    }
+                }
+            }
+            json_response := '{' . json_parts.Join(', ') . '}'
+        }
         
         if FileExist(ResponseFile)
             FileDelete(ResponseFile)
@@ -705,10 +805,19 @@ AddAndPurchaseClickHandler(gui) {
         FileAppend("Captured fresh URL: " . currentUrl . "`n", "command_debug.txt")
     }
     
-    ; Format response with purchase info
-    response := "add_and_purchase|" . description . "|" . modifier . "|" . priority . "|" . defaultQuantity . "|" . currentUrl . "|" . price . "|" . purchaseQuantity
-    FileAppend("AddAndPurchaseClickHandler - writing response: " . response . "`n", "command_debug.txt")
-    WriteResponse(response)
+    ; Create JSON response with purchase info
+    response_obj := Map()
+    response_obj["type"] := "add_and_purchase"
+    response_obj["description"] := description
+    response_obj["modifier"] := modifier
+    response_obj["priority"] := Integer(priority)
+    response_obj["default_quantity"] := Integer(defaultQuantity)
+    response_obj["url"] := currentUrl
+    response_obj["price"] := price != "" ? Float(price) : ""
+    response_obj["purchase_quantity"] := Integer(purchaseQuantity)
+    
+    FileAppend("AddAndPurchaseClickHandler - writing JSON response`n", "command_debug.txt")
+    WriteResponseJSON(response_obj)
     WriteStatus("COMPLETED")
     gui.Destroy()
     
@@ -864,7 +973,7 @@ StartPurchaseDetection() {
         CurrentPurchaseButton.Text := "✅ Add & Purchase"
         CurrentPurchaseButton.Opt("BackgroundGreen cWhite")
         
-        ; Stop monitoring this page
+        ; Stop monitoring this page immediately
         ButtonFound := false
     }
 }
