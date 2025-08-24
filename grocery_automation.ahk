@@ -25,7 +25,8 @@ CurrentPurchaseButton := ""
 ; Initialize - clear any leftover files from previous session
 try {
     FileDelete(CommandFile)
-    FileDelete(ResponseFile)
+    FileDelete(ResponseFile) 
+    FileDelete(StatusFile)  ; Clear old status file too
 } catch {
     ; Ignore errors if files don't exist
 }
@@ -969,11 +970,8 @@ StartPurchaseDetection() {
     if (mouseX >= ButtonRegion.left && mouseX <= ButtonRegion.right && 
         mouseY >= ButtonRegion.top && mouseY <= ButtonRegion.bottom) {
         
-        ; Change button to Add & Purchase state
+        ; Simply change button state - that's it!
         CurrentPurchaseButton.Text := "✅ Add & Purchase"
         CurrentPurchaseButton.Opt("BackgroundGreen cWhite")
-        
-        ; Stop monitoring this page immediately
-        ButtonFound := false
     }
 }
