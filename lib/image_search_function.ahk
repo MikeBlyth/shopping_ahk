@@ -1,7 +1,13 @@
 ; Image search function for purchase detection
 ; Returns object with found status, coordinates, and timing
 
-FindAddToCartButton(timeoutMs := 5000) {
+FindAddToCartButton(timeoutMs := 5000, targetWindow := "") {
+    ; Activate target window if provided
+    if (targetWindow) {
+        WinActivate(targetWindow)
+        WinWaitActive(targetWindow)
+    }
+    
     ; Get screen dimensions
     ScreenWidth := SysGet(78)
     ScreenHeight := SysGet(79)

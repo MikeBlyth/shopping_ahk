@@ -9,6 +9,7 @@
 - ✅ **Crash detection**: Ruby automatically signals AHK to close on any exit scenario
 - ✅ **Two-section sheet format**: Product list + Shopping list with proper handling
 - ✅ **Quit signal handling**: Ruby properly exits when user presses Ctrl+Shift+Q
+- ✅ **Purchase detection**: Detects "Add to Cart" clicks with visual feedback in dialogs
 - Git repository committed and ready (local commits ahead of remote)
 
 ## Key Technical Details
@@ -191,6 +192,15 @@ The system now operates with just **two user hotkeys**:
 - **Improved**: Status messages clearly show required actions at each step
 - **Benefit**: Simpler user experience with just two hotkeys to remember
 
+### Purchase Detection Implementation ✅
+- **Feature**: Detects when user clicks "Add to Cart" button on product pages using image search
+- **Visual Feedback**: Purchase dialogs start with red "⚠️ Override" button, change to green "✅ Add & Purchase" when cart click detected
+- **Image Search**: Uses `images/add_to_cart_left.png` with tolerance *100, searches 75-90% width, 20-80% height of screen
+- **Click Monitoring**: Global `~LButton::` hotkey monitors clicks in detected button region
+- **Window Activation Fix**: Image search activates browser window before searching to ensure consistent detection
+- **JSON Response Format**: Converted from pipe-delimited to proper JSON for reliable data communication
+- **Integration**: Works seamlessly with existing purchase dialogs without disrupting workflow
+
 
 
 ## Item Matching Rules
@@ -227,23 +237,16 @@ The system now operates with just **two user hotkeys**:
 
 ## Current Development
 
-### Purchase detection
+### Purchase Detection - COMPLETED ✅
 
-I want to add the ability for the app to detect when the user has purchased a product by clicking the add to cart button. Otherwise, I could click the "Add Purchase" button in the app but forget to do so in the online store.
+Purchase detection feature has been successfully implemented and is now fully operational:
 
-This involves
-- Detect the button position by image search. The image to match is ./images/add_to_cart.png
-- The search range for that image is 
-    x: 75% to 90% of width
-    y: 20% to 80% of height
-- Color tolerance is 10
+- **Image Search**: Uses `images/add_to_cart_left.png` to locate "Add to Cart" buttons on product pages
+- **Search Region**: 75-90% width, 20-80% height of screen with *100 tolerance
+- **Visual Feedback**: Dialogs start with red "⚠️ Override" button, change to green "✅ Add & Purchase" when cart click detected
+- **Click Monitoring**: Global mouse click handler monitors the detected button region
+- **Window Activation**: Ensures browser window is active before image search for consistent detection
+- **JSON Communication**: Proper JSON formatting for reliable data exchange between AHK and Ruby
+- **Integration**: Works seamlessly with both purchase dialogs and add item dialogs
 
-Flow
-
-- When navigating to a page, the purchase dialog will be shown as usual, but without the "Add & Purchase" button. A prompt in the dialog will remind the user to click "Add to Cart" or skip.
-- AHK will find add_to_cart.png
-- The button region will be defined as that point (upper-left) to the (x: right edge of screen, y: upper y + 100 pixels)
-- AHK will then monitor for a click in that region/
-- When a click is detected, the "Add & Purchase" button will be added to the dialog.
-
-In this way, the user can't "purchase" an item in the app until they click the shop's add_to_cart button.
+The system now prevents users from marking items as purchased in the app until they actually click the "Add to Cart" button on the website, ensuring synchronization between the automation and actual shopping cart actions.

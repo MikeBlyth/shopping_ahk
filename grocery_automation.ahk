@@ -321,9 +321,9 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     purchaseGui.Show()
     WriteStatus("WAITING_FOR_INPUT")
     
-    ; Start purchase detection with delay for page loading
+    ; Start purchase detection
     FileAppend("Calling StartPurchaseDetection from ShowPurchaseDialog`n", "command_debug.txt")
-    SetTimer(() => StartPurchaseDetection(), -2000)  ; 2 second delay, one-shot
+    StartPurchaseDetection()
 }
 
 ; Event handler functions for Purchase dialog
@@ -748,9 +748,9 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     addItemGui.Show()
     WriteStatus("WAITING_FOR_INPUT")
     
-    ; Start purchase detection with delay for page loading
+    ; Start purchase detection
     FileAppend("Calling StartPurchaseDetection from ShowAddItemDialogWithDefaults`n", "command_debug.txt")
-    SetTimer(() => StartPurchaseDetection(), -2000)  ; 2 second delay, one-shot
+    StartPurchaseDetection()
 }
 
 ; Event handler functions for Add Item dialog
@@ -948,15 +948,24 @@ PerformQuit() {
 StartPurchaseDetection() {
     global ButtonRegion, ButtonFound
     
+    FileAppend("StartPurchaseDetection called`n", "command_debug.txt")
+    
     ; Reset for new page
     ButtonFound := false
     
+    ; Small delay for page loading before searching
+    FileAppend("About to call FindAddToCartButton`n", "command_debug.txt")
     ; Search for Add to Cart button on page  
-    result := FindAddToCartButton(3000)  ; 3 second search
+    result := FindAddToCartButton(5000, TargetWindowHandle)  ; 5 second search
+    
+    FileAppend("FindAddToCartButton returned: found=" . result.found . "`n", "command_debug.txt")
     
     if (result.found) {
         ButtonRegion := result.clickRegion
         ButtonFound := true
+        FileAppend("Button found! Region set to: " . ButtonRegion.left . "," . ButtonRegion.top . " to " . ButtonRegion.right . "," . ButtonRegion.bottom . "`n", "command_debug.txt")
+    } else {
+        FileAppend("Button NOT found`n", "command_debug.txt")
     }
     ; If not found, ButtonFound stays false - user can click Override
 }
@@ -970,11 +979,8 @@ StartPurchaseDetection() {
     MouseGetPos(&mouseX, &mouseY)
     
     ; Show click position tooltip
-    ToolTip("Click: " . mouseX . "," . mouseY . ", " . ButtonFound, mouseX + 10, mouseY + 10)
-    SetTimer(() => ToolTip(), -1000)  ; Hide after 1 second
-    Sleep(1000)
-    ToolTip("Click+: " . mouseX . "," . mouseY . ", " . ButtonFound, mouseX + 10, mouseY + 30)
-    SetTimer(() => ToolTip(), -1000)  ; Hide after 1 second
+;    ToolTip("Click: " . mouseX . "," . mouseY . ", " . ButtonFound, mouseX + 10, mouseY + 10)
+;    SetTimer(() => ToolTip(), -1000)  ; Hide after 1 second
     
     ; Debug: log why clicks might be ignored
     if (!ButtonFound) {
