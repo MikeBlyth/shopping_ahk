@@ -8,6 +8,24 @@
 ; Use fast typing of URL 
 SendMode "Input"
 
+; Hotkeys
+^+q::{
+    ; Clean exit - signal Ruby and shutdown
+    PerformQuit()
+}
+
+^+a::{
+    ; Add new item hotkey
+    FileAppend("Ctrl+Shift+A pressed - calling ShowAddItemDialogHotkey`n", "command_debug.txt")
+    ShowAddItemDialogHotkey()
+}
+
+^+s::{  ; Ctrl+Shift+S to show status
+    status := FileExist(StatusFile) ? FileRead(StatusFile) : "No status file"
+    MsgBox("Current Status: " . status . "`n`nActive hotkeys: Ctrl+Shift+A (add item), Ctrl+Shift+Q (quit)")
+}
+
+
 ; File paths for communication
 ScriptDir := A_ScriptDir
 CommandFile := ScriptDir . "\ahk_command.txt"
@@ -304,7 +322,8 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     WriteStatus("WAITING_FOR_INPUT")
     
     ; Start purchase detection with delay for page loading
-    SetTimer(() => StartPurchaseDetection(), 2000)  ; 2 second delay
+    FileAppend("Calling StartPurchaseDetection from ShowPurchaseDialog`n", "command_debug.txt")
+    SetTimer(() => StartPurchaseDetection(), -2000)  ; 2 second delay, one-shot
 }
 
 ; Event handler functions for Purchase dialog
@@ -645,22 +664,6 @@ ProcessSessionComplete() {
 }
 
 
-; Hotkeys
-^+q::{
-    ; Clean exit - signal Ruby and shutdown
-    PerformQuit()
-}
-
-^+a::{
-    ; Add new item hotkey
-    FileAppend("Ctrl+Shift+A pressed - calling ShowAddItemDialogHotkey`n", "command_debug.txt")
-    ShowAddItemDialogHotkey()
-}
-
-^+s::{  ; Ctrl+Shift+S to show status
-    status := FileExist(StatusFile) ? FileRead(StatusFile) : "No status file"
-    MsgBox("Current Status: " . status . "`n`nActive hotkeys: Ctrl+Shift+A (add item), Ctrl+Shift+Q (quit)")
-}
 
 ; Add Item Dialog Functions
 ShowAddItemDialog(suggestedName) {
@@ -746,7 +749,8 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     WriteStatus("WAITING_FOR_INPUT")
     
     ; Start purchase detection with delay for page loading
-    SetTimer(() => StartPurchaseDetection(), 2000)  ; 2 second delay
+    FileAppend("Calling StartPurchaseDetection from ShowAddItemDialogWithDefaults`n", "command_debug.txt")
+    SetTimer(() => StartPurchaseDetection(), -2000)  ; 2 second delay, one-shot
 }
 
 ; Event handler functions for Add Item dialog
@@ -944,34 +948,60 @@ PerformQuit() {
 StartPurchaseDetection() {
     global ButtonRegion, ButtonFound
     
-    ; Search for Add to Cart button on page
+    ; Reset for new page
+    ButtonFound := false
+    
+    ; Search for Add to Cart button on page  
     result := FindAddToCartButton(3000)  ; 3 second search
     
     if (result.found) {
         ButtonRegion := result.clickRegion
         ButtonFound := true
-    } else {
-        ButtonFound := false
     }
+    ; If not found, ButtonFound stays false - user can click Override
 }
 
 ; Global click handler for purchase detection
 ~LButton:: {
     global ButtonRegion, ButtonFound, CurrentPurchaseButton
     
-    if (!ButtonFound || !CurrentPurchaseButton)
-        return
-    
-    ; Get click position
+    ; Get click position for logging
     CoordMode("Mouse", "Screen")
     MouseGetPos(&mouseX, &mouseY)
     
-    ; Check if click is in Add to Cart button region
-    if (mouseX >= ButtonRegion.left && mouseX <= ButtonRegion.right && 
-        mouseY >= ButtonRegion.top && mouseY <= ButtonRegion.bottom) {
+    ; Show click position tooltip
+    ToolTip("Click: " . mouseX . "," . mouseY . ", " . ButtonFound, mouseX + 10, mouseY + 10)
+    SetTimer(() => ToolTip(), -1000)  ; Hide after 1 second
+    Sleep(1000)
+    ToolTip("Click+: " . mouseX . "," . mouseY . ", " . ButtonFound, mouseX + 10, mouseY + 30)
+    SetTimer(() => ToolTip(), -1000)  ; Hide after 1 second
+    
+    ; Debug: log why clicks might be ignored
+    if (!ButtonFound) {
+        FileAppend("CLICK: " . mouseX . "," . mouseY . " IGNORED - ButtonFound=false`n", "command_debug.txt")
+        return
+    }
+    if (!CurrentPurchaseButton) {
+        FileAppend("CLICK: " . mouseX . "," . mouseY . " IGNORED - CurrentPurchaseButton=null`n", "command_debug.txt")
+        return
+    }
+    
+    ; Log all clicks when button detection is active
+    if (ButtonFound && CurrentPurchaseButton) {
+        FileAppend("CLICK: " . mouseX . "," . mouseY . " Region: " . ButtonRegion.left . "," . ButtonRegion.top . " to " . ButtonRegion.right . "," . ButtonRegion.bottom . " ", "command_debug.txt")
         
-        ; Simply change button state - that's it!
-        CurrentPurchaseButton.Text := "✅ Add & Purchase"
-        CurrentPurchaseButton.Opt("BackgroundGreen cWhite")
+        ; Check if click is in Add to Cart button region
+        inRegion := (mouseX >= ButtonRegion.left && mouseX <= ButtonRegion.right && 
+                     mouseY >= ButtonRegion.top && mouseY <= ButtonRegion.bottom)
+        
+        if (inRegion) {
+            FileAppend("HIT - Changing button`n", "command_debug.txt")
+            
+            ; Simply change button state - that's it!
+            CurrentPurchaseButton.Text := "✅ Add & Purchase"
+            CurrentPurchaseButton.Opt("BackgroundGreen cWhite")
+        } else {
+            FileAppend("MISS`n", "command_debug.txt")
+        }
     }
 }

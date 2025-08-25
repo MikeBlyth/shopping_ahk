@@ -5,7 +5,7 @@ FindAddToCartButton(timeoutMs := 5000) {
     ; Get screen dimensions
     ScreenWidth := SysGet(78)
     ScreenHeight := SysGet(79)
-    
+    FileAppend("Starting FindAddToCartButton: Screen " . ScreenWidth . "x" . ScreenHeight . "`n", "command_debug.txt")
     ; Calculate search area (75-90% width, 20-80% height)
     SearchLeft := Round(ScreenWidth * 0.75)
     SearchTop := Round(ScreenHeight * 0.20)
@@ -44,7 +44,7 @@ FindAddToCartButton(timeoutMs := 5000) {
     }
     
     searchTime := A_TickCount - startTime
-    
+    FileAppend("FindAddToCartButton result = " . found . "`n", "command_debug.txt")
     ; Return result object
     if (found) {
         return {
