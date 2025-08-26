@@ -44,7 +44,7 @@ class WalmartDatabase
     @items.where(Sequel.ilike(:description, "%#{description}%")).order(:priority, :description).all
   end
 
-  def create_item(prod_id:, url:, description:, modifier: nil, default_quantity: 1, priority: 1)
+  def create_item(prod_id:, url:, description:, modifier: nil, default_quantity: 1, priority: 1, subscribable: false)
     # Normalize priority: treat nil or empty as 1 (highest priority)
     normalized_priority = (priority.nil? || priority == '') ? 1 : priority
     
@@ -54,7 +54,8 @@ class WalmartDatabase
       description: description,
       modifier: modifier,
       default_quantity: default_quantity,
-      priority: normalized_priority
+      priority: normalized_priority,
+      subscribable: subscribable
     )
   end
 

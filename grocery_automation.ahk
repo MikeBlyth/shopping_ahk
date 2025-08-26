@@ -722,6 +722,10 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     addItemGui.Add("Text", "xm y+10", "Default Quantity:")
     defaultQuantityEdit := addItemGui.Add("Edit", "w100 r1", "1")
     
+    ; Subscribable checkbox
+    addItemGui.Add("Text", "xm y+10", "Subscribable:")
+    subscribableCheckbox := addItemGui.Add("Checkbox", "w20 h20", "")
+    
     ; Separator
     addItemGui.Add("Text", "xm y+15 w400", "────────────── Purchase Info ──────────────")
     
@@ -748,6 +752,7 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     addItemGui.modifierEdit := modifierEdit
     addItemGui.priorityEdit := priorityEdit
     addItemGui.defaultQuantityEdit := defaultQuantityEdit
+    addItemGui.subscribableCheckbox := subscribableCheckbox
     addItemGui.priceEdit := priceEdit
     addItemGui.purchaseQuantityEdit := purchaseQuantityEdit
     addItemGui.currentUrl := currentUrl
@@ -776,6 +781,7 @@ AddAndPurchaseClickHandler(gui) {
     modifier := Trim(gui.modifierEdit.Text)
     priority := Trim(gui.priorityEdit.Text)
     defaultQuantity := Trim(gui.defaultQuantityEdit.Text)
+    subscribable := gui.subscribableCheckbox.Value
     price := Trim(gui.priceEdit.Text)
     purchaseQuantity := Trim(gui.purchaseQuantityEdit.Text)
     
@@ -834,6 +840,7 @@ AddAndPurchaseClickHandler(gui) {
     response_obj["modifier"] := modifier
     response_obj["priority"] := Integer(priority)
     response_obj["default_quantity"] := Integer(defaultQuantity)
+    response_obj["subscribable"] := subscribable ? true : false
     response_obj["url"] := currentUrl
     response_obj["price"] := price != "" ? Float(price) : ""
     response_obj["purchase_quantity"] := Integer(purchaseQuantity)
@@ -853,6 +860,7 @@ AddOnlyClickHandler(gui) {
     modifier := Trim(gui.modifierEdit.Text)
     priority := Trim(gui.priorityEdit.Text)
     defaultQuantity := Trim(gui.defaultQuantityEdit.Text)
+    subscribable := gui.subscribableCheckbox.Value
     
     ; Validate description (required for Add Only)
     if description = "" {
@@ -887,8 +895,9 @@ AddOnlyClickHandler(gui) {
         FileAppend("Captured fresh URL: " . currentUrl . "`n", "command_debug.txt")
     }
     
-    ; Format response without purchase info (original format)
-    response := description . "|" . modifier . "|" . priority . "|" . defaultQuantity . "|" . currentUrl
+    ; Format response without purchase info (original format with subscribable)
+    subscribable_text := subscribable ? "1" : "0"
+    response := description . "|" . modifier . "|" . priority . "|" . defaultQuantity . "|" . subscribable_text . "|" . currentUrl
     FileAppend("AddOnlyClickHandler - writing response: " . response . "`n", "command_debug.txt")
     WriteResponse(response)
     WriteStatus("COMPLETED")

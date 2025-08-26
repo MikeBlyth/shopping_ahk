@@ -599,14 +599,15 @@ class WalmartGroceryAssistant
           return handle_add_and_purchase(parts[1..-1])
         end
 
-        # Original format: description|modifier|priority|default_quantity|url
-        return nil if parts.length < 5
+        # Original format: description|modifier|priority|default_quantity|subscribable|url
+        return nil if parts.length < 6
 
         description = parts[0].strip
         modifier = parts[1].strip
         priority = parts[2].strip.to_i
         default_quantity = parts[3].strip.to_i
-        url = parts[4].strip
+        subscribable = parts[4].strip == '1'
+        url = parts[5].strip
       else
         puts '❌ Unrecognized response format'
         return nil
@@ -648,6 +649,7 @@ class WalmartGroceryAssistant
           updates[:default_quantity] =
             default_quantity
         end
+        updates[:subscribable] = subscribable if subscribable != existing_item[:subscribable]
 
         if updates.any?
           @db.update_item(prod_id, updates)
@@ -681,7 +683,8 @@ class WalmartGroceryAssistant
         description: description,
         modifier: modifier.empty? ? nil : modifier,
         default_quantity: default_quantity,
-        priority: priority
+        priority: priority,
+        subscribable: subscribable
       )
       puts '🔍 DEBUG: Database insert successful for add_only'
     rescue StandardError => e
@@ -694,6 +697,7 @@ class WalmartGroceryAssistant
     puts "   Modifier: #{modifier.empty? ? '(none)' : modifier}"
     puts "   Priority: #{priority}"
     puts "   Default Qty: #{default_quantity}"
+    puts "   Subscribable: #{subscribable ? 'Yes' : 'No'}"
     puts "   Product ID: #{prod_id}"
 
     # Update Google Sheets
@@ -886,6 +890,7 @@ class WalmartGroceryAssistant
     modifier = parsed_response[:modifier]&.strip || ''
     priority = parsed_response[:priority] || 1
     default_quantity = parsed_response[:default_quantity] || 1
+    subscribable = parsed_response[:subscribable] || false
     url = parsed_response[:url]&.strip || ''
     price = parsed_response[:price]
     purchase_quantity = parsed_response[:purchase_quantity] || 1
@@ -927,6 +932,7 @@ class WalmartGroceryAssistant
             updates[:default_quantity] =
               default_quantity
           end
+          updates[:subscribable] = subscribable if subscribable != existing_item[:subscribable]
 
           if updates.any?
             @db.update_item(prod_id, updates)
@@ -986,7 +992,8 @@ class WalmartGroceryAssistant
         description: description,
         modifier: modifier.empty? ? nil : modifier,
         default_quantity: default_quantity,
-        priority: priority
+        priority: priority,
+        subscribable: subscribable
       )
       puts "✅ New item added: #{description}"
 
