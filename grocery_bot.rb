@@ -1,7 +1,6 @@
 require 'uri'
 require 'csv'
 require 'json'
-require 'set'
 require 'colorize'
 require 'dotenv/load'
 require_relative 'lib/google_sheets_integration'
@@ -47,17 +46,14 @@ class WalmartGroceryAssistant
     grocery_items = load_items_to_order
 
     if grocery_items.empty?
-      puts "No items found to order."
+      puts 'No items found to order.'
     else
       puts "🛍️ Found #{grocery_items.length} items to order"
       puts '🚀 Starting shopping automation...'
 
-      result = process_grocery_list(grocery_items)
-      
-      # Only show completion message if user didn't quit
-      unless result == :quit
-        @ahk.show_message("Shopping complete!\n\nReview your cart and proceed to checkout when ready.")
-      end
+      process_grocery_list(grocery_items)
+
+      @ahk.show_message("Shopping complete!\n\nReview your cart and proceed to checkout when ready.")
     end
 
     # Shopping list processing complete - signal session complete to show persistent tooltip
@@ -66,14 +62,14 @@ class WalmartGroceryAssistant
     else
       puts '✅ Shopping list processing complete!'
     end
-    
+
     # Signal AHK to show completion status and persistent tooltip (don't read response)
     @ahk.send_command('SESSION_COMPLETE')
-    
+
     # Wait for AHK to signal that user wants to end
     puts '⏳ Waiting for user to exit (Ctrl+Shift+Q)...'
     wait_for_ahk_shutdown
-    
+
     # Sync database items back to Google Sheets when user is done
     puts '💾 Syncing database items to Google Sheets...'
     sync_database_to_sheets
@@ -109,30 +105,27 @@ class WalmartGroceryAssistant
 
       # Perform final Google Sheets sync if we have shopping list data
       if @shopping_list_data && !@shopping_list_data.empty? && @sheets_sync
-        puts "📊 Performing emergency sheet sync before exit..."
+        puts '📊 Performing sheet sync before exit...'
         begin
           puts "🔍 DEBUG: About to sync @shopping_list_data (#{@shopping_list_data.length} items)"
           puts "🔍 DEBUG: First few items: #{@shopping_list_data.first(2).inspect}"
           result = @sheets_sync.sync_from_database(@db, @shopping_list_data)
-          puts "✅ Emergency sync complete: #{result[:products]} products, #{result[:shopping_items]} shopping items"
+          puts "✅ Sync complete: #{result[:products]} products, #{result[:shopping_items]} shopping items"
         rescue StandardError => e
-          puts "❌ Emergency sheet sync failed: #{e.message}"
+          puts "❌ Final sheet sync failed: #{e.message}"
         end
       else
-        puts "ℹ️ No shopping list data to sync"
+        puts 'ℹ️ No shopping list data to sync'
       end
 
       # Signal AHK to terminate gracefully
-      if @ahk
-        @ahk.terminate_ahk
-      end
+      @ahk.terminate_ahk if @ahk
 
       puts '✅ Cleanup complete'
     rescue StandardError => e
       puts "⚠️ Cleanup error (non-critical): #{e.message}"
     end
   end
-
 
   def setup_ahk
     # Always start fresh - kill any existing AutoHotkey and clean files
@@ -192,7 +185,7 @@ class WalmartGroceryAssistant
     puts '🎯 AutoHotkey is ready and waiting for you!'
     puts '📋 Instructions:'
     puts '   1. Open your browser to walmart.com'
-    puts "   2. System will automatically start processing your shopping list"
+    puts '   2. System will automatically start processing your shopping list'
     puts ''
     puts '⏳ Waiting for ready signal...'
 
@@ -217,28 +210,28 @@ class WalmartGroceryAssistant
   def load_items_to_order
     if @sheets_sync
       sheet_data = @sheets_sync.get_grocery_list
-      
+
       # Get shopping list items and remove duplicates (case-insensitive)
       shopping_items = sheet_data[:shopping_list]
       unique_shopping_items = []
       seen_items = Set.new
-      
+
       shopping_items.each do |item|
         normalized_name = item[:item].strip.downcase
-        unless seen_items.include?(normalized_name)
+        if seen_items.include?(normalized_name)
+          puts "⚠️  Skipping duplicate item: #{item[:item]}"
+        else
           unique_shopping_items << item
           seen_items << normalized_name
-        else
-          puts "⚠️  Skipping duplicate item: #{item[:item]}"
         end
       end
-      
+
       # Store deduplicated shopping list for later rewriting
       puts "🔍 DEBUG: Setting @shopping_list_data to unique_shopping_items (#{unique_shopping_items.length} items)"
       @shopping_list_data = unique_shopping_items
-      
+
       # Process only items with quantity != 0 AND no purchase mark
-      items_to_order = unique_shopping_items.select do |item| 
+      items_to_order = unique_shopping_items.select do |item|
         item[:quantity] != 0 && (item[:purchased].nil? || item[:purchased].strip.empty?)
       end
 
@@ -309,7 +302,7 @@ class WalmartGroceryAssistant
     else
       # Multiple fuzzy matches - user needs to choose
       result = handle_multiple_matches(item_name, matches)
-      return result == :search_new_item ? nil : result
+      result == :search_new_item ? nil : result
     end
   end
 
@@ -322,11 +315,11 @@ class WalmartGroceryAssistant
     all_items.each do |db_item|
       # Calculate match score against description only
       desc_score = calculate_match_score(item_name, db_item[:description])
-      
+
       # Calculate match score against description + modifier combined
       combined_text = [db_item[:description], db_item[:modifier]].compact.join(' ')
       combined_score = calculate_match_score(item_name, combined_text)
-      
+
       # Use the higher of the two scores
       match_score = [desc_score, combined_score].max
       next if match_score == 0
@@ -335,8 +328,8 @@ class WalmartGroceryAssistant
       item_lower = item_name.downcase.strip
       desc_lower = db_item[:description].downcase.strip
       combined_lower = combined_text.downcase.strip
-      
-      match_type = (item_lower == desc_lower || item_lower == combined_lower) ? :exact : :fuzzy
+
+      match_type = item_lower == desc_lower || item_lower == combined_lower ? :exact : :fuzzy
 
       matches << {
         item: db_item,
@@ -389,7 +382,7 @@ class WalmartGroceryAssistant
       display_priority = item[:priority].nil? || item[:priority] == '' ? 'blank (=1)' : item[:priority]
       "#{item[:description]} (Priority: #{display_priority}, Score: #{match[:score]})"
     end
-    
+
     # Add option to search for new item
     search_option_number = match_options.length + 1
     match_options << "Search for new item: '#{item_name}'"
@@ -401,14 +394,10 @@ class WalmartGroceryAssistant
     )
 
     # Check if user selected existing match
-    if selection && selection > 0 && selection <= matches.length
-      return matches[selection - 1][:item]
-    end
-    
+    return matches[selection - 1][:item] if selection && selection > 0 && selection <= matches.length
+
     # Check if user selected "search for new item"
-    if selection == search_option_number
-      return :search_new_item
-    end
+    return :search_new_item if selection == search_option_number
 
     nil # User skipped or invalid selection
   end
@@ -428,12 +417,12 @@ class WalmartGroceryAssistant
       if db_item && db_item != :search_new_item
         puts "   ✅ Found in database: #{db_item[:prod_id]} - #{db_item[:description]}"
         navigate_to_known_item(db_item)
-        
+
         puts '   💬 Showing user interaction dialog...'
         sleep(1)
         result = handle_user_interaction(item_name, db_item)
-        return :quit if result == :quit  # Exit shopping list processing and return quit signal
-        
+        # NOTE: If user quits, handle_user_interaction will call exit(0) directly
+
         # Handle "Search Again" request - treat like multi-choice "search for new item"
         if result == :search_new_item
           puts '   🔍 User requested search for alternatives via "Search Again" button'
@@ -468,13 +457,13 @@ class WalmartGroceryAssistant
   def wait_for_item_completion(item_name)
     # Wait for user to press Ctrl+Shift+A to complete the item
     puts '   ⏳ Waiting for item completion via Ctrl+Shift+A...'
-    
+
     loop do
       sleep(1)
-      
+
       # Check AHK status - when user presses Ctrl+Shift+A, status will change
       status = @ahk.check_status
-      
+
       case status
       when 'COMPLETED'
         # User completed an action - check if there's a response
@@ -494,28 +483,27 @@ class WalmartGroceryAssistant
   def handle_shopping_list_completion(original_item_name, response_data)
     # Handle completion of a specific shopping list item via Ctrl+Shift+A
     puts "🔍 DEBUG: Completing shopping list item '#{original_item_name}' with response: #{response_data}"
-    
+
     parsed_response = parse_response(response_data)
     puts "🔍 DEBUG: Parsed response type: '#{parsed_response[:type]}', value: '#{parsed_response[:value]}'"
-    
+
     # Check for skip first, before processing purchase data
     if parsed_response[:type] == 'status' && parsed_response[:value] == 'skipped'
-      puts "🔍 DEBUG: SKIP DETECTED - handling skip immediately"
+      puts '🔍 DEBUG: SKIP DETECTED - handling skip immediately'
       # User clicked "Skip Item" - mark with red X
-      update_shopping_list_item(original_item_name, 
-        purchased: '❌',  # Red X for skipped items
-        itemno: '',
-        price_paid: 0.0,
-        quantity_purchased: 0
-      )
+      update_shopping_list_item(original_item_name,
+                                purchased: '❌', # Red X for skipped items
+                                itemno: '',
+                                price_paid: 0.0,
+                                quantity_purchased: 0)
       puts "⏭️ Shopping list item '#{original_item_name}' marked as skipped"
       return
     end
-    
+
     case parsed_response[:type]
     when 'add_and_purchase'
-      puts "🔍 DEBUG: Processing shopping list completion with add_and_purchase"
-      
+      puts '🔍 DEBUG: Processing shopping list completion with add_and_purchase'
+
       # Extract data from response
       description = parsed_response[:description]
       modifier = parsed_response[:modifier]
@@ -524,7 +512,7 @@ class WalmartGroceryAssistant
       url = parsed_response[:url]
       price = parsed_response[:price]
       purchase_quantity = parsed_response[:purchase_quantity] || 1
-      
+
       # Add item to database if URL is valid (using existing proven pattern)
       db_item = nil
       if url && url.include?('walmart.com') && url.include?('/ip/')
@@ -539,13 +527,16 @@ class WalmartGroceryAssistant
             updates[:description] = description unless description.empty?
             updates[:modifier] = modifier unless modifier.empty?
             updates[:priority] = priority if priority > 0 && priority != existing_item[:priority]
-            updates[:default_quantity] = default_quantity if default_quantity > 0 && default_quantity != existing_item[:default_quantity]
-            
+            if default_quantity > 0 && default_quantity != existing_item[:default_quantity]
+              updates[:default_quantity] =
+                default_quantity
+            end
+
             if updates.any?
               @db.update_item(prod_id, updates)
               puts "✅ Updated existing item: #{updates.keys.join(', ')}"
             end
-            
+
             db_item = @db.find_item_by_prod_id(prod_id)
           else
             puts "✅ Creating new item: #{prod_id} - #{description}"
@@ -562,7 +553,7 @@ class WalmartGroceryAssistant
           end
         end
       end
-      
+
       # Record purchase if price provided
       if price && price > 0 && db_item
         price_cents = (price * 100).to_i
@@ -573,17 +564,15 @@ class WalmartGroceryAssistant
         )
         puts "✅ Recorded purchase: #{purchase_quantity}x #{description} @ $#{price}"
       end
-      
+
       # Most importantly: Update the ORIGINAL shopping list item as purchased
-      update_shopping_list_item(original_item_name, 
-        purchased: '✓',
-        itemno: db_item ? db_item[:prod_id] : '',
-        price_paid: price.to_f,
-        quantity_purchased: purchase_quantity.to_i
-      )
+      update_shopping_list_item(original_item_name,
+                                purchased: '✓',
+                                itemno: db_item ? db_item[:prod_id] : '',
+                                price_paid: price.to_f,
+                                quantity_purchased: purchase_quantity.to_i)
       puts "✅ Updated shopping list item '#{original_item_name}' as purchased"
 
-      
     else
       puts "⚠️ Unexpected response type for shopping list completion: #{parsed_response[:type]}"
     end
@@ -591,60 +580,60 @@ class WalmartGroceryAssistant
 
   def handle_add_new_item(response_data)
     puts "🔍 DEBUG: Processing add item response: #{response_data}"
-    
+
     parsed_response = parse_response(response_data)
-    
+
     case parsed_response[:type]
     when 'add_and_purchase'
-      puts "🔍 DEBUG: Using JSON add_and_purchase format"
+      puts '🔍 DEBUG: Using JSON add_and_purchase format'
       return handle_add_and_purchase_json(parsed_response)
     when 'data', 'unknown'
       # Try legacy pipe-delimited format
       if response_data.is_a?(String) && response_data.include?('|')
         parts = response_data.split('|')
         puts "🔍 DEBUG: Split into #{parts.length} parts: #{parts.inspect}"
-        
+
         # Check if this is the legacy combined format
         if parts[0] == 'add_and_purchase' && parts.length >= 8
-          puts "🔍 DEBUG: Using legacy add_and_purchase format"
+          puts '🔍 DEBUG: Using legacy add_and_purchase format'
           return handle_add_and_purchase(parts[1..-1])
         end
-        
+
         # Original format: description|modifier|priority|default_quantity|url
         return nil if parts.length < 5
-        
+
         description = parts[0].strip
         modifier = parts[1].strip
         priority = parts[2].strip.to_i
         default_quantity = parts[3].strip.to_i
         url = parts[4].strip
       else
-        puts "❌ Unrecognized response format"
+        puts '❌ Unrecognized response format'
         return nil
       end
     else
       puts "❌ Unrecognized response type: #{parsed_response[:type]}"
       return nil
     end
-    
+
     return nil if description.empty? || url.empty?
-    
+
     # Validate URL format
     unless url.include?('walmart.com') && url.include?('/ip/')
       puts "❌ Invalid URL: #{url}"
       puts "   URL must be a Walmart product page (contain 'walmart.com' and '/ip/')"
       return nil
     end
-    
+
     # Normalize URL - remove query parameters and fragments
     url = url.split('?').first.split('#').first
-    
+
     # Extract product ID from URL
     puts "🔍 DEBUG: Extracting product ID from URL: #{url}"
     prod_id = @db.extract_prod_id_from_url(url)
     puts "🔍 DEBUG: Extracted product ID: #{prod_id}"
     return nil unless prod_id
-    
+
     # Check if item already exists
     existing_item = @db.find_item_by_prod_id(prod_id)
     if existing_item
@@ -655,21 +644,24 @@ class WalmartGroceryAssistant
         updates[:description] = description unless description.strip.empty?
         updates[:modifier] = modifier unless modifier.strip.empty?
         updates[:priority] = priority if priority > 0 && priority != existing_item[:priority]
-        updates[:default_quantity] = default_quantity if default_quantity > 0 && default_quantity != existing_item[:default_quantity]
-        
+        if default_quantity > 0 && default_quantity != existing_item[:default_quantity]
+          updates[:default_quantity] =
+            default_quantity
+        end
+
         if updates.any?
           @db.update_item(prod_id, updates)
           puts "🔍 DEBUG: Database update successful for add_only - updated: #{updates.keys.join(', ')}"
-          puts "✅ Item updated without purchase"
+          puts '✅ Item updated without purchase'
         else
-          puts "🔍 DEBUG: No updates needed - all fields same as existing"
-          puts "✅ Item processed without changes or purchase"
+          puts '🔍 DEBUG: No updates needed - all fields same as existing'
+          puts '✅ Item processed without changes or purchase'
         end
       rescue StandardError => e
         puts "❌ DEBUG: Database update failed: #{e.message}"
         return nil
       end
-      
+
       # Return updated item structure
       return {
         prod_id: prod_id,
@@ -680,7 +672,7 @@ class WalmartGroceryAssistant
         priority: priority
       }
     end
-    
+
     # Create new item in database
     begin
       @db.create_item(
@@ -691,22 +683,22 @@ class WalmartGroceryAssistant
         default_quantity: default_quantity,
         priority: priority
       )
-      puts "🔍 DEBUG: Database insert successful for add_only"
+      puts '🔍 DEBUG: Database insert successful for add_only'
     rescue StandardError => e
       puts "❌ DEBUG: Database insert failed: #{e.message}"
       puts "   Backtrace: #{e.backtrace.first}"
       return nil
     end
-    
+
     puts "✅ Added new item: #{description}"
     puts "   Modifier: #{modifier.empty? ? '(none)' : modifier}"
     puts "   Priority: #{priority}"
     puts "   Default Qty: #{default_quantity}"
     puts "   Product ID: #{prod_id}"
-    
+
     # Update Google Sheets
     @sheets_sync.update_item_url(description, url) if @sheets_sync
-    
+
     # Return the newly created item data
     {
       prod_id: prod_id,
@@ -722,7 +714,7 @@ class WalmartGroceryAssistant
     # Format: description|modifier|priority|default_quantity|url|price|purchase_quantity
     puts "🔍 DEBUG: handle_add_and_purchase called with #{parts.length} parts: #{parts.inspect}"
     return nil if parts.length < 7
-    
+
     description = parts[0].strip
     modifier = parts[1].strip
     priority = parts[2].strip.to_i
@@ -730,25 +722,25 @@ class WalmartGroceryAssistant
     url = parts[4].strip
     price_str = parts[5].strip
     purchase_quantity_str = parts[6].strip
-    
+
     return nil if url.empty?
-    
+
     # Validate URL format
     unless url.include?('walmart.com') && url.include?('/ip/')
       puts "❌ Invalid URL: #{url}"
       puts "   URL must be a Walmart product page (contain 'walmart.com' and '/ip/')"
       return nil
     end
-    
+
     # Normalize URL - remove query parameters and fragments
     url = url.split('?').first.split('#').first
-    
+
     # Extract product ID from URL
     puts "🔍 DEBUG: Extracting product ID from URL: #{url}"
     prod_id = @db.extract_prod_id_from_url(url)
     puts "🔍 DEBUG: Extracted product ID: #{prod_id}"
     return nil unless prod_id
-    
+
     # Check if item already exists
     existing_item = @db.find_item_by_prod_id(prod_id)
     if existing_item
@@ -764,19 +756,22 @@ class WalmartGroceryAssistant
           updates[:description] = description unless description.strip.empty?
           updates[:modifier] = modifier unless modifier.strip.empty?
           updates[:priority] = priority if priority > 0 && priority != existing_item[:priority]
-          updates[:default_quantity] = default_quantity if default_quantity > 0 && default_quantity != existing_item[:default_quantity]
-          
+          if default_quantity > 0 && default_quantity != existing_item[:default_quantity]
+            updates[:default_quantity] =
+              default_quantity
+          end
+
           if updates.any?
             @db.update_item(prod_id, updates)
             puts "🔍 DEBUG: Database update successful - updated: #{updates.keys.join(', ')}"
           else
-            puts "🔍 DEBUG: No updates needed - all fields same as existing"
+            puts '🔍 DEBUG: No updates needed - all fields same as existing'
           end
         rescue StandardError => e
           puts "❌ DEBUG: Database update failed: #{e.message}"
           return nil
         end
-        
+
         # Use updated info for purchase recording
         item_for_purchase = {
           prod_id: prod_id,
@@ -784,7 +779,7 @@ class WalmartGroceryAssistant
           default_quantity: default_quantity
         }
       end
-      
+
       # Record purchase if price provided
       if !price_str.empty?
         puts "🔍 DEBUG: Attempting to record purchase - price: #{price_str}, quantity: #{purchase_quantity_str}"
@@ -794,16 +789,16 @@ class WalmartGroceryAssistant
           price_cents = (price_float * 100).to_i
           puts "🔍 DEBUG: Parsed values - price_cents: #{price_cents}, quantity: #{purchase_quantity}"
           puts "🔍 DEBUG: Item for purchase: #{item_for_purchase.inspect}"
-          
+
           record_purchase(item_for_purchase, price_cents: price_cents, quantity: purchase_quantity)
           puts "✅ Recorded purchase: #{purchase_quantity}x #{item_for_purchase[:description]} @ $#{price_str}"
-          
+
           # Verify the purchase was actually saved
           recent_purchases = @db.get_recent_purchases(days: 1).select { |p| p[:prod_id] == item_for_purchase[:prod_id] }
           if recent_purchases.any?
             puts "🔍 DEBUG: Verified purchase in database: #{recent_purchases.first.inspect}"
           else
-            puts "❌ DEBUG: Purchase NOT found in database after recording!"
+            puts '❌ DEBUG: Purchase NOT found in database after recording!'
           end
         rescue ArgumentError => e
           puts "❌ DEBUG: ArgumentError in purchase recording: #{e.message}"
@@ -812,19 +807,19 @@ class WalmartGroceryAssistant
           puts "   Backtrace: #{e.backtrace.first}"
         end
       else
-        puts "✅ Item processed without purchase (no price provided)"
+        puts '✅ Item processed without purchase (no price provided)'
       end
-      
+
       return item_for_purchase
     end
-    
+
     # For new items, description is required
     if description.empty? || description.strip.empty?
-      puts "❌ Cannot create new item without description"
-      puts "   (Purchase-only mode only works for existing items)"
+      puts '❌ Cannot create new item without description'
+      puts '   (Purchase-only mode only works for existing items)'
       return nil
     end
-    
+
     # Create new item in database
     begin
       @db.create_item(
@@ -835,44 +830,44 @@ class WalmartGroceryAssistant
         default_quantity: default_quantity,
         priority: priority
       )
-      puts "🔍 DEBUG: Database insert successful for add_and_purchase"
+      puts '🔍 DEBUG: Database insert successful for add_and_purchase'
     rescue StandardError => e
       puts "❌ DEBUG: Database insert failed: #{e.message}"
       puts "   Backtrace: #{e.backtrace.first}"
       return nil
     end
-    
+
     puts "✅ Added new item: #{description}"
     puts "   Modifier: #{modifier.empty? ? '(none)' : modifier}"
     puts "   Priority: #{priority}"
     puts "   Default Qty: #{default_quantity}"
     puts "   Product ID: #{prod_id}"
-    
+
     # Update Google Sheets
     @sheets_sync.update_item_url(description, url) if @sheets_sync
-    
+
     # Record purchase if price was provided
     if !price_str.empty?
       begin
         price_float = Float(price_str)
         purchase_quantity = Integer(purchase_quantity_str)
         price_cents = (price_float * 100).to_i
-        
+
         new_item = {
           prod_id: prod_id,
           description: description,
           default_quantity: default_quantity
         }
-        
+
         record_purchase(new_item, price_cents: price_cents, quantity: purchase_quantity)
         puts "✅ Recorded purchase: #{purchase_quantity}x #{description} @ $#{price_str}"
       rescue ArgumentError
-        puts "⚠️ Invalid price or quantity format, item added but no purchase recorded"
+        puts '⚠️ Invalid price or quantity format, item added but no purchase recorded'
       end
     else
-      puts "✅ Item added without purchase (no price provided)"
+      puts '✅ Item added without purchase (no price provided)'
     end
-    
+
     # Return the newly created item data (for consistency, though not used in the new flow)
     {
       prod_id: prod_id,
@@ -886,33 +881,33 @@ class WalmartGroceryAssistant
 
   def handle_add_and_purchase_json(parsed_response)
     puts "🔍 DEBUG: handle_add_and_purchase_json called with: #{parsed_response.inspect}"
-    
-    description = parsed_response[:description]&.strip || ""
-    modifier = parsed_response[:modifier]&.strip || ""
+
+    description = parsed_response[:description]&.strip || ''
+    modifier = parsed_response[:modifier]&.strip || ''
     priority = parsed_response[:priority] || 1
     default_quantity = parsed_response[:default_quantity] || 1
-    url = parsed_response[:url]&.strip || ""
+    url = parsed_response[:url]&.strip || ''
     price = parsed_response[:price]
     purchase_quantity = parsed_response[:purchase_quantity] || 1
-    
+
     return nil if url.empty?
-    
+
     # Validate URL format
     unless url.include?('walmart.com') && url.include?('/ip/')
       puts "❌ Invalid URL: #{url}"
       puts "   URL must be a Walmart product page (contain 'walmart.com' and '/ip/')"
       return nil
     end
-    
+
     # Normalize URL - remove query parameters and fragments
     url = url.split('?').first.split('#').first
-    
+
     # Extract product ID from URL
     puts "🔍 DEBUG: Extracting product ID from URL: #{url}"
     prod_id = @db.extract_prod_id_from_url(url)
     puts "🔍 DEBUG: Extracted product ID: #{prod_id}"
     return nil unless prod_id
-    
+
     # Check if item already exists
     existing_item = @db.find_item_by_prod_id(prod_id)
     if existing_item
@@ -928,58 +923,61 @@ class WalmartGroceryAssistant
           updates[:description] = description unless description.empty?
           updates[:modifier] = modifier unless modifier.empty?
           updates[:priority] = priority if priority > 0 && priority != existing_item[:priority]
-          updates[:default_quantity] = default_quantity if default_quantity > 0 && default_quantity != existing_item[:default_quantity]
-          
+          if default_quantity > 0 && default_quantity != existing_item[:default_quantity]
+            updates[:default_quantity] =
+              default_quantity
+          end
+
           if updates.any?
             @db.update_item(prod_id, updates)
             puts "🔍 DEBUG: Database update successful for JSON format - updated: #{updates.keys.join(', ')}"
           end
-          
+
           item_for_purchase = @db.find_item_by_prod_id(prod_id)
         rescue StandardError => e
           puts "❌ DEBUG: Database update failed: #{e.message}"
           return nil
         end
       end
-      
+
       # Record purchase if price is provided
       if price && price > 0
         begin
           price_cents = (price * 100).to_i
           record_purchase(item_for_purchase, price_cents: price_cents, quantity: purchase_quantity)
           puts "✅ Recorded purchase: #{purchase_quantity}x #{item_for_purchase[:description]} @ $#{price}"
-          
+
           # Add to shopping list data for sync display
           update_shopping_list_item(item_for_purchase[:description], {
-            purchased: '✓',
-            itemno: item_for_purchase[:prod_id],
-            price_paid: price,
-            quantity_purchased: purchase_quantity,
-            url: item_for_purchase[:url] || url
-          })
+                                      purchased: '✓',
+                                      itemno: item_for_purchase[:prod_id],
+                                      price_paid: price,
+                                      quantity_purchased: purchase_quantity,
+                                      url: item_for_purchase[:url] || url
+                                    })
         rescue StandardError => e
           puts "❌ DEBUG: Purchase recording failed: #{e.message}"
         end
       else
-        puts "✅ Item processed without purchase (no price provided)"
-        
-        # Add to shopping list data without purchase info  
+        puts '✅ Item processed without purchase (no price provided)'
+
+        # Add to shopping list data without purchase info
         update_shopping_list_item(item_for_purchase[:description], {
-          itemno: item_for_purchase[:prod_id],
-          url: item_for_purchase[:url] || url
-        })
+                                    itemno: item_for_purchase[:prod_id],
+                                    url: item_for_purchase[:url] || url
+                                  })
       end
-      
+
       return item_for_purchase
     end
-    
+
     # For new items, description is required
     if description.empty?
-      puts "❌ Cannot create new item without description"
-      puts "   (Purchase-only mode only works for existing items)"
+      puts '❌ Cannot create new item without description'
+      puts '   (Purchase-only mode only works for existing items)'
       return nil
     end
-    
+
     # Create new item in database
     begin
       @db.create_item(
@@ -991,41 +989,41 @@ class WalmartGroceryAssistant
         priority: priority
       )
       puts "✅ New item added: #{description}"
-      
+
       # Record purchase if price is provided
       if price && price > 0
         price_cents = (price * 100).to_i
-        
+
         new_item = {
           prod_id: prod_id,
           description: description,
           default_quantity: default_quantity
         }
-        
+
         record_purchase(new_item, price_cents: price_cents, quantity: purchase_quantity)
         puts "✅ Recorded purchase: #{purchase_quantity}x #{description} @ $#{price}"
-        
+
         # Add to shopping list data for sync display
         update_shopping_list_item(description, {
-          purchased: '✓',
-          itemno: prod_id,
-          price_paid: price,
-          quantity_purchased: purchase_quantity,
-          modifier: modifier,
-          url: url
-        })
+                                    purchased: '✓',
+                                    itemno: prod_id,
+                                    price_paid: price,
+                                    quantity_purchased: purchase_quantity,
+                                    modifier: modifier,
+                                    url: url
+                                  })
       else
-        puts "✅ Item added without purchase (no price provided)"
-        
+        puts '✅ Item added without purchase (no price provided)'
+
         # Add to shopping list data without purchase info
         update_shopping_list_item(description, {
-          itemno: prod_id,
-          modifier: modifier,
-          url: url
-        })
+                                    itemno: prod_id,
+                                    modifier: modifier,
+                                    url: url
+                                  })
       end
-      
-      return {
+
+      {
         prod_id: prod_id,
         url: url,
         description: description,
@@ -1035,14 +1033,14 @@ class WalmartGroceryAssistant
       }
     rescue StandardError => e
       puts "❌ Failed to create new item: #{e.message}"
-      return nil
+      nil
     end
   end
 
   def handle_user_interaction(item_name, db_item = nil)
     # Preserve original shopping list item name for shopping list updates
     original_shopping_item_name = item_name
-    
+
     if db_item
       # Known item - use db_item description for display, but keep original name for shopping list
       display_name = db_item[:description]
@@ -1068,32 +1066,30 @@ class WalmartGroceryAssistant
     end
 
     parsed_response = parse_response(response)
-    
+
     # Check for quit signal first
     if parsed_response[:type] == 'status' && %w[quit shutdown].include?(parsed_response[:value])
-      puts '✅ User requested exit during item prompt'
-      return :quit
+      puts '✅ User requested exit - terminating Ruby'
+      exit(0)
     end
-    
+
     # Update shopping list item immediately with purchase info
     case parsed_response[:type]
     when 'purchase_new'
       # Mark as purchased and update shopping list with itemid, quantity, and price
-      update_shopping_list_item(original_shopping_item_name, 
-        purchased: '✓',
-        itemno: db_item ? db_item[:prod_id] : '',
-        price_paid: parsed_response[:price].to_f,
-        quantity_purchased: parsed_response[:quantity].to_i
-      )
+      update_shopping_list_item(original_shopping_item_name,
+                                purchased: '✓',
+                                itemno: db_item ? db_item[:prod_id] : '',
+                                price_paid: parsed_response[:price].to_f,
+                                quantity_purchased: parsed_response[:quantity].to_i)
     when 'purchase'
       # Mark as purchased and update shopping list with itemid, quantity, and price
-      update_shopping_list_item(original_shopping_item_name, 
-        purchased: '✓',
-        itemno: db_item ? db_item[:prod_id] : '',
-        price_paid: parsed_response[:price].to_f,
-        quantity_purchased: parsed_response[:quantity].to_i
-      )
-      
+      update_shopping_list_item(original_shopping_item_name,
+                                purchased: '✓',
+                                itemno: db_item ? db_item[:prod_id] : '',
+                                price_paid: parsed_response[:price].to_f,
+                                quantity_purchased: parsed_response[:quantity].to_i)
+
       # Still record in database
       if db_item && db_item[:prod_id]
         price_cents = (parsed_response[:price] * 100).to_i
@@ -1137,10 +1133,10 @@ class WalmartGroceryAssistant
       # Handle "Search Again" button (choice 999) like "search for new item" in multi-choice
       if parsed_response[:value] == 999
         puts "🔍 User requested search for alternatives: #{original_shopping_item_name}"
-        
+
         # Trigger the same search flow as multi-choice "search for new item"
         # This will be handled by returning :search_new_item and going back to main process loop
-        return :search_new_item
+        :search_new_item
       else
         # Handle other choice responses if any
         puts "⚠️ Unexpected choice response: #{parsed_response[:value]}"
@@ -1150,12 +1146,11 @@ class WalmartGroceryAssistant
       # Handle status responses like 'skipped' from skip button
       if parsed_response[:value] == 'skipped'
         # User clicked "Skip Item" - mark with red X
-        update_shopping_list_item(original_shopping_item_name, 
-          purchased: '❌',  # Red X for skipped items
-          itemno: db_item ? db_item[:prod_id] : '',
-          price_paid: 0.0,
-          quantity_purchased: 0
-        )
+        update_shopping_list_item(original_shopping_item_name,
+                                  purchased: '❌', # Red X for skipped items
+                                  itemno: db_item ? db_item[:prod_id] : '',
+                                  price_paid: 0.0,
+                                  quantity_purchased: 0)
         puts "⏭️ Item '#{original_shopping_item_name}' marked as skipped"
       end
 
@@ -1217,13 +1212,12 @@ class WalmartGroceryAssistant
     # Update shopping list with itemid, quantity, and price
     completion_name = shopping_list_name || item[:description]
     price_paid = price_cents ? (price_cents / 100.0) : nil
-    
-    update_shopping_list_item(completion_name, 
-      purchased: '✓',
-      itemno: item[:prod_id],
-      price_paid: price_paid,
-      quantity_purchased: quantity
-    )
+
+    update_shopping_list_item(completion_name,
+                              purchased: '✓',
+                              itemno: item[:prod_id],
+                              price_paid: price_paid,
+                              quantity_purchased: quantity)
 
     if price_cents
       price_display = "$#{format('%.2f', price_cents / 100.0)}"
@@ -1236,13 +1230,13 @@ class WalmartGroceryAssistant
   def update_shopping_list_item(item_name, updates = {})
     puts "🔍 DEBUG: update_shopping_list_item called for '#{item_name}' with updates: #{updates.inspect}"
     puts "🔍 DEBUG: Caller: #{caller[0]}"
-    
+
     # Initialize @shopping_list_data if it doesn't exist
     @shopping_list_data ||= []
 
     # Find existing shopping list item
     shopping_item = @shopping_list_data.find { |item| item[:item].downcase == item_name.downcase }
-    
+
     if shopping_item
       # Update existing item
       updates.each do |key, value|
@@ -1262,70 +1256,68 @@ class WalmartGroceryAssistant
         itemno: '',
         url: ''
       }
-      
+
       # Apply updates to the new item
       updates.each do |key, value|
         new_shopping_item[key] = value
       end
-      
+
       @shopping_list_data << new_shopping_item
       puts "✅ Created new shopping item: #{item_name} with #{updates.keys.join(', ')}"
     end
   end
 
-
-
   def wait_for_ahk_shutdown
-    puts "🔍 DEBUG: Starting wait_for_ahk_shutdown loop..."
-    
+    puts '🔍 DEBUG: Starting wait_for_ahk_shutdown loop...'
+
     # Check for any existing response file and process it
     if File.exist?(@ahk.class::RESPONSE_FILE)
-      puts "🔍 DEBUG: Found existing response file, processing..."
+      puts '🔍 DEBUG: Found existing response file, processing...'
       response = @ahk.read_response
       puts "🔍 DEBUG: Read response: '#{response}'"
-      
+
       parsed_response = parse_response(response)
-      
+
       if parsed_response[:type] == 'status' && %w[quit shutdown].include?(parsed_response[:value])
         puts '✅ User requested exit'
         return # Exit the function, which will end wait_for_ahk_shutdown
       elsif parsed_response[:type] == 'status' && parsed_response[:value] == 'session_reset'
         puts '🔍 DEBUG: Session complete confirmation received'
         puts '⏳ Waiting for user to exit (Ctrl+Shift+Q) or add items (Ctrl+Shift+A)...'
-      elsif response && !response.empty? && 
+      elsif response && !response.empty? &&
             !(parsed_response[:type] == 'status' && parsed_response[:value] == 'cancelled') &&
-            parsed_response[:type] != 'status'  # Don't process status responses as items
+            parsed_response[:type] != 'status' # Don't process status responses as items
         puts '📦 Processing existing item response...'
         handle_add_new_item(response)
       end
     end
-    
+
     loop do
-      sleep(0.5)  # Check twice per second
-      
+      sleep(0.5) # Check twice per second
+
       # Check if AHK wrote a response (happens for session_reset, add item, or quit)
-      if File.exist?(@ahk.class::RESPONSE_FILE)
-        puts "🔍 DEBUG: Found response file, reading..."
-        response = @ahk.read_response
-        puts "🔍 DEBUG: Read response: '#{response}'"
-        
-        parsed_response = parse_response(response)
-        
-        if parsed_response[:type] == 'status' && %w[quit shutdown].include?(parsed_response[:value])
-          puts '✅ User requested exit'
-          break
-        elsif parsed_response[:type] == 'status' && parsed_response[:value] == 'session_reset'
-          puts '🔍 DEBUG: Session complete confirmation received'
-          puts '⏳ Waiting for user to exit (Ctrl+Shift+Q) or add items (Ctrl+Shift+A)...'
-          # Continue monitoring
-        elsif response && !response.empty? && 
-              !(parsed_response[:type] == 'status' && parsed_response[:value] == 'cancelled') &&
-              parsed_response[:type] != 'status'  # Don't process status responses as items
-          puts '📦 Processing newly added item...'
-          handle_add_new_item(response)
-        else
-          puts "🔍 DEBUG: Response was empty, cancelled, or nil"
-        end
+      next unless File.exist?(@ahk.class::RESPONSE_FILE)
+
+      puts '🔍 DEBUG: Found response file, reading...'
+      response = @ahk.read_response
+      puts "🔍 DEBUG: Read response: '#{response}'"
+
+      parsed_response = parse_response(response)
+
+      if parsed_response[:type] == 'status' && %w[quit shutdown].include?(parsed_response[:value])
+        puts '✅ User requested exit'
+        break
+      elsif parsed_response[:type] == 'status' && parsed_response[:value] == 'session_reset'
+        puts '🔍 DEBUG: Session complete confirmation received'
+        puts '⏳ Waiting for user to exit (Ctrl+Shift+Q) or add items (Ctrl+Shift+A)...'
+        # Continue monitoring
+      elsif response && !response.empty? &&
+            !(parsed_response[:type] == 'status' && parsed_response[:value] == 'cancelled') &&
+            parsed_response[:type] != 'status' # Don't process status responses as items
+        puts '📦 Processing newly added item...'
+        handle_add_new_item(response)
+      else
+        puts '🔍 DEBUG: Response was empty, cancelled, or nil'
       end
     end
   end
