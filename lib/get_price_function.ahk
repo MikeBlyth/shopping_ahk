@@ -1,3 +1,29 @@
+/*
+=============================================================================
+WALMART PRICE EXTRACTION USING FINDTEXT OCR
+=============================================================================
+
+HOW IT WORKS:
+1. Uses pre-trained character patterns for Walmart's large price font
+2. Searches screen region for price characters ($, 0-9, .)
+3. Uses OCR to assemble found characters into readable text
+4. Validates result has exactly 2 decimal places (proper price format)
+5. Returns clean price string without $ symbol, or empty string if failed
+
+TECHNICAL APPROACH:
+- Character Library: Contains exact pixel patterns for each price character
+- Font Specificity: Only matches large price font, ignores smaller text
+- Error Tolerance: Strict matching (0.05) to avoid false positives
+- OCR Assembly: Combines individual characters based on screen position
+- Silent Operation: No messages, failures return empty string for optional use
+
+USAGE:
+- Call LoadPriceCharacters() once at startup
+- Call get_price(x1, y1, x2, y2) to extract price from screen region
+- Returns: "13.98" (success) or "" (failure)
+=============================================================================
+*/
+
 #include <FindTextv2>
 
 ; Load character library for price recognition - call this once at startup
@@ -20,45 +46,58 @@ LoadPriceCharacters() {
     FindText().PicLib(Text, 1)
 }
 
-; Extract price from screen region - returns price without $ (e.g. "13.98") or empty string if failed
-; Silent operation - no messages, failures ignored
+/*
+MAIN PRICE EXTRACTION FUNCTION
+Parameters: x1,y1,x2,y2 - screen coordinates defining search rectangle
+Returns: "13.98" (price without $) or "" (extraction failed)
+*/
 get_price(x1, y1, x2, y2) {
-    ; Character recognition with stored character library - only large price font
+    
+    ; STEP 1: SEARCH FOR PRICE CHARACTERS
+    ; Use character library to find all price-related characters ($, 0-9, .) in the screen region
     priceChars := "$1234567890."
     X := ""
     Y := ""
     
-    ; Use stricter error tolerance and exact size matching to avoid smaller text
+    ; FindText searches for exact character patterns with strict error tolerance (0.05)
+    ; This ensures we only match the large price font, not smaller text elsewhere
     if (ok := FindText(&X, &Y, x1, y1, x2, y2, 0.05, 0.05, FindText().PicN(priceChars))) {
-        ; Use OCR to assemble characters into text with tighter spacing
+        
+        ; STEP 2: ASSEMBLE CHARACTERS INTO TEXT
+        ; OCR function arranges found characters by screen position into readable text
+        ; Parameters (5, 3) = tight spacing to handle close character positioning
         if (ocrResult := FindText().OCR(ok, 5, 3)) {
             extractedText := ocrResult.text
         } else {
-            return ""  ; OCR assembly failed - silent failure
+            return ""  ; OCR assembly failed - characters found but couldn't arrange them
         }
     } else {
-        return ""  ; No price characters found - silent failure
+        return ""  ; No matching price characters found in search region
     }
     
-    ; Clean up the OCR result and extract price
-    cleanedText := StrReplace(extractedText, "*", ".")  ; Replace * with . for decimal point
+    ; STEP 3: CLEAN AND VALIDATE EXTRACTED TEXT
+    ; Handle OCR imperfections and validate price format
+    cleanedText := StrReplace(extractedText, "*", ".")  ; OCR sometimes sees decimal as *
     
-    ; Extract price pattern - $ is optional but require exactly 2 decimal places
+    ; STEP 4: EXTRACT VALID PRICE PATTERN
+    ; Must have exactly 2 decimal places to be considered a valid price
+    ; $ symbol is optional (different colors may not be recognized)
     pricePattern := ""
     
-    ; Try with $ first
+    ; Try different price pattern variations:
     if RegExMatch(cleanedText, "\$(\d+\.\d{2})", &match) {
-        pricePattern := match[1]  ; Return without $
+        ; Perfect case: $13.98
+        pricePattern := match[1]  ; Return digits only: "13.98"
     } else if RegExMatch(extractedText, "\$(\d+)\*(\d{2})", &match) {
-        ; Handle the * case directly  
-        pricePattern := match[1] . "." . match[2]  ; Return without $
+        ; OCR substitution case: $13*98  
+        pricePattern := match[1] . "." . match[2]  ; Fix to: "13.98"
     } else if RegExMatch(cleanedText, "(\d+\.\d{2})", &match) {
-        ; No $ found, but valid ##.## pattern
-        pricePattern := match[1]
+        ; Missing $ case: 13.98 (different colored $ not recognized)
+        pricePattern := match[1]  ; Return: "13.98"
     } else if RegExMatch(extractedText, "(\d+)\*(\d{2})", &match) {
-        ; No $ found, * for decimal
-        pricePattern := match[1] . "." . match[2]
+        ; Missing $ + OCR substitution: 13*98
+        pricePattern := match[1] . "." . match[2]  ; Fix to: "13.98"
     }
     
-    return pricePattern  ; Returns "13.98" or "" if no valid price found
+    return pricePattern  ; Returns "13.98" or "" if no valid price pattern found
 }
