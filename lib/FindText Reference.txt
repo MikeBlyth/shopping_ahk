@@ -1,0 +1,709 @@
+In-depth FindText tutorial, v1.5
+Last updated: 19.06.2024
+
+Many thanks to users feiyue for creating FindText, and users ed1chandler and c4p whose tutorials I based mine on.
+Link to the FindText library: viewtopic.php?f=6&t=17834
+
+Introduction
+FindText is an AHK library that is an alternative to the built-in ImageSearch function, and includes a lot of additional functionalities. The main FindText function can basically be used to find graphics (images) on your screen quickly and with less matching error problems than ImageSearch. It lets you capture a small image from your screen and turn it into black-and-white (something like ASCII art), which is then turned into a single line of text. Then when using FindText, it will capture a screenshot from your screen, convert each pixel in the screenshot also into black-and-white, and tries to match your captured image to the screenshot. Since pixels are turned into black-and-white, much less information is needed for comparisons (instead of three comparisons for red, green and blue, only one comparison of black-and-white is needed) and the search happens faster than for example with ImageSearch.
+
+Some of the advantages of FindText:
+1) It doesn’t require an image file, instead it uses a text representation of an image. This function abstracts the screen’s image into representative "0"s ("0" = black pixels = text pixels) and "_"s ("_" = white pixels = background pixels), which in turn are turned into a single line of numbers and letters. Because this is an abstraction and not a bit-by-bit comparison, it allows for fast matching and easy adjustments of fault tolerances.
+2) It is faster than ImageSearch, in my tests by about 10% (and possibly even 2-3x faster depending on the use case)
+3) Provides functions for easy storage and fetching of images inside your script
+4) Makes it possible to use FindText in windows which are hidden behind other windows using BindWindow
+5) Allows creation of simple custom OCR functions
+
+Table of Contents
+1) Getting Started
+2) FindText main function
+3) ImageSearch, PixelSearch, PixelCount, GetPixelColor
+4) What is Text?
+5) Capture modes
+6) Helper functions Click, MouseTip, RangeTip, GetRange, ScreenToWindow, ScreenToClient, ClientToScreen, WindowToScreen
+7) Text library functions PicLib, PicN, PicX, PicInfo
+8) FindText combination lookup
+9) Optical character recognition (OCR)
+10) BindWindow - peeking behind windows
+11) FindTextClass
+12) Screenshot functions: ScreenShot, GetColor, SetColor, GetTextFromScreen, SavePic, ShowPic, ShowScreenShot
+13) Miscellaneous: Sort, Sort2, Sort3, WaitChange, WaitNotChange, zoom arguments
+14) FindText speed improvement tips
+
+1) Getting Started
+After downloading FindText.ahk, I recommend putting it in the Lib folder and then including it in your script using
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+#include <FindText>
+After doing that you can speed up your already implemented ImageSearches by replacing them with FindText().ImageSearch, like this:
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+ImageSearch, OutputVarX, OutputVarY, X1, Y1, X2, Y2, ImageFile
+ ; turns into this
+FindText().ImageSearch(OutputVarX , OutputVarY, X1, Y1, X2, Y2, ImageFile)
+But the recommended way of using FindText is using the FindText main function and using Text instead of an image file. To do that, first run FindText.ahk and the following Gui should show up:
+FindText main gui examples.png
+FindText main gui examples.png (260.92 KiB) Viewed 78297 times
+Press the Capture button -> select the area you want to capture -> right click twice (first to select, then move your mouse away and right-click again to confirm) -> press Gray2Two button -> press OK. If everything went without problems, then if you now press "Test", FindText should successfully find your captured image (a flashing red box will appear where the image was found).
+FindText capture gui.PNG
+FindText capture gui.PNG (236.76 KiB) Viewed 78297 times
+After capturing the image, some auto-generated code should show up in the lower textbox, something like this:
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+Text:="|<>*151$101.000000000000000000000000U0000M0000000000100000k0000000400200011U0000000A0040002300000000M008000460000DVUnw7kHk7kzAA7X0vX1XUtkxktksMkvW036331UlVVUkUn11a02A6661X161V1g63A1wMAAA343A323kDy8DMkMMM286M247UM0NkFUkkkAEAkA8BUk0nVX1VVUMUNUMEPVU0b33331UV0lUUUnXU1zS7S63b21Xb1dX3a1bY7g71s431s1n33s300000000000000006000000000000000080000000000000000k00000000000000034"
+
+if (ok:=FindText(X, Y, 312-150000, 79-150000, 312+150000, 79+150000, 0, 0, Text))
+{
+  ; FindText().Click(X, Y, "L")
+}
+...
+• The Text variable is contains the image in text/string form, along with some other necessary information.
+• FindText(X, Y, 312-150000, 79-150000, 312+150000, 79+150000, 0, 0, Text) means that variables X and Y will be assigned coordinates for the first found image's exact center; numbers 312 and 79 are the x and y coordinates where the image was originally captured, and 312-150000 and 79-150000 are just some very negative x and y coordinates for the left upper corner of the search area (to include windows offscreen or second monitors); 312+150000 and 79+150000 are some very large values for the right lower corner of the search area; 0 and 0 are the default error margins (only allowing an exact match); Text variable gives FindText our image in text form.
+• If the comment sign (;) is removed from before FindText.Click, then if FindText is successful the found image will be left-clicked.
+
+The next parts will include some example scripts, which can easily be ran by copy-pasting into the top of the example code box of FindText main Gui and pressing Test. Save the following image in your computer and open it in Paint. Make sure it is visible before pressing Test, and the screen DPI should be 150%.
+Examples.png
+Examples.png (141.97 KiB) Viewed 78297 times
+
+2) FindText main function
+The following is mostly taken from the FindText.ahk top description area (with some additions):
+returnArray := FindText(
+OutputX --> The name of the variable used to store the X coordinate for the first found image's center point. OutputX can also be set to "wait" or "wait1" (appear), or "wait0" (disappear), to make FindText either wait for the text to appear or disappear. If OutputX is left empty, then a search won't be performed and instead the FindTextClass instance will be returned: this is used for example in FindText().Click, which is equivalent to FindText(,,,,,,,,Text).Click (the Text will be ignored). The most minimalist FindText call that performs a search would be FindText(X,,,,,,,,Text).
+, OutputY --> The name of the variable used to store the Y coordinate for the first found image's center point. If OutputX is set to "wait", then OutputY can be set to the wait time in seconds, and time less than 0 means infinite waiting.[/list]
+, X1 --> the search scope's upper left corner X coordinate
+, Y1 --> the search scope's upper left corner Y coordinate
+, X2 --> the search scope's lower right corner X coordinate
+, Y2 --> the search scope's lower right corner Y coordinate
+If X1, Y1, X2, Y2 are all set to 0 (the default value), then X1 and Y1 will be set to -150000, X2 and Y2 to 150000. This will set the search scope for the whole screen and anything off-screen as well.
+, err1 --> Fault tolerance percentage of text (text=black="o") (0.1=10%).
+, err0 --> Fault tolerance percentage of background (background=white="_") (0.1=10%)
+If err1 and err0 are 0 and no match is found, then FindText will automatically try again with 0.05=5% error margins. To avoid that behaviour, specify some very small values for err1 and err0 (such as 0.000001 which is effectively 0, but not equivalent to 0).
+, Text --> can be a lot of images in text form, separated by "|"
+, ScreenShot --> if the value is 0, the last screenshot will be used, default is 1 (a new screenshot is taken every time)
+, FindAll --> if the value is 0, return after the first found result, default is 1 (finds all results)
+, JoinText --> used for combination lookup: it can be 1, or an array of words to find, default is 0
+, offsetX --> Set the max text offset (X) for combination lookup
+, offsetY --> Set the max text offset (Y) for combination lookup
+, dir --> Nine directions for searching:
+1 ==> ( Left to Right ) Top to Bottom
+2 ==> ( Right to Left ) Top to Bottom
+3 ==> ( Left to Right ) Bottom to Top
+4 ==> ( Right to Left ) Bottom to Top
+5 ==> ( Top to Bottom ) Left to Right
+6 ==> ( Bottom to Top ) Left to Right
+7 ==> ( Top to Bottom ) Right to Left
+8 ==> ( Bottom to Top ) Right to Left
+9 ==> From center outwards
+, zoomW --> zoom factor of image width (1.0=100%)
+, zoomH --> zoom factor of image height (1.0=100%)
+)
+
+The function returns a second-order array containing all lookup results (returnArray[1] for first found result, returnArray[2] for second ...), any result is an associative array: {1:X, 2:Y, 3:W, 4:H, x:X+W//2, y:Y+H//2, id:Comment}.
+If no image is found then FindText returns 0.
+
+For example, if the return variable's name is "ok", ok[1] is the first result found.
+ok[1][1] and ok[1][2] are the X and Y coordinates for the upper left corner of the first found image,
+ok[1][3] is the width of the found image, and ok[1][4] is the height of the found image,
+ok[1].x <==> ok[1][1]+ok[1][3]//2 <==> OutputX ( X coordinate for the center of the found image ),
+ok[1].y <==> ok[1][2]+ok[1][4]//2 <==> OutputY ( Y coordinate for the center of the found image ),
+ok[1].id is the comment text, which is included in the <> part of Text.
+If OutputX is set to "wait" or "wait1" (appear), or "wait0" (disappear), then timeout will mean failure and return 0, other values means success. If waiting to appear and the image is found, returns the found array object. If waiting to disappear and the image cannot be found, returns 1.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+FindText(X:="wait", Y:=3, 0,0,0,0,0,0,Text)   ; Wait 3 seconds for appear
+FindText(X:="wait0", Y:=-1, 0,0,0,0,0,0,Text) ; Wait indefinitely for disappear
+Some more notes:
+• All coordinates returned are relative to the screen (as in CoordMode Screen). To convert to relative coordinate, use conversion functions ScreenToWindow and ScreenToClient.
+• All colors are in hexadecimal RGB format.
+• FindText is screen DPI sensitive, which means that images/Text captured with one DPI won't work with another. To make sure the user is using a correct DPI, use the built-in variable A_ScreenDPI to check.
+• Beware of using X1,Y1,X2,Y2 of 0,0,A_ScreenWidth,A_ScreenHeight when using multiple monitors, because it will only capture the main display. It is recommended to either leave them blank (the default -150000,-150000,150000,150000 should be large enough), or use similarly large values as the default.
+
+For the following examples, open Examples.png provided in section 1 with Paint. Then run the code in a new script, or copy the code without the #include line to the FindText Gui code box and press Test.
+
+Example 1.
+Code: Select all - Expand - Download - Line numbers - Word wrap - V1
+
+#include <FindText>
+Text:="|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8" ; Image of the "auto" part in "autohotkey.com". Id of the image is "auto" (between < and > characters).
+ok := FindText(outX, outY,,,,,,,Text) ; Call FindText to look for the "auto" image. outX and outY will be set to X and Y coordinates for the first found result. Search range coordinates, err1 and err0 are left empty to use the default values (searching the whole screen, and looking for an exact match). Results will be stored in the "ok" variable.
+if ok { ; Check if "ok" is not set to 0
+    MsgBox, The image (Text) was first found at coordinates X: %outX% Y: %outY% ; Display outX and outY
+    MsgBox, % ok.MaxIndex() " results were found." ; ok.MaxIndex() and ok.Length() should return how many search results were found.
+    MsgBox, % "The first found image is located at X" ok[1][1] " Y" ok[1][2] ". It has a width of " ok[1][3] " and a height of " ok[1][4] ". Additionally it has a id of " ok[1].id
+    if ok[2] ; ok[1] contains the first result, ok[2] contains the second result, etc... Check if ok[2] exists and if yes, display some of its contents.
+        MsgBox, % "The second found image is located at X" ok[2][1] " Y" ok[2][2] " and it has a width of " ok[2][3] " and a height of " ok[2][4] ". Additionally it has a comment text of " ok[2].id
+} else {
+    MsgBox, The image/Text was not found. Is everything set up correctly and the image is visible in Paint? ; It seems "ok" was left empty, so nothing was found.
+}
+Example 2.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+#include <FindText>
+
+if (ok := FindText(outX, outY, 0, 0, A_ScreenWidth, A_ScreenHeight, 0.05, 0.05, "|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8")) { ; Call FindText to look for the "auto" image. outX and outY will be set to X and Y coordinates for the first found result. Search ranges top left corner is (0;0) and bottom right corner (A_ScreenWidth; A_ScreenHeight), which should search the whole screen, but might not work properly if using multiple monitors. Error margins are set to 5% for both "1"s and "0"s. Results will be stored in the "ok" variable. If "ok" contains results, then the "if" condition will be successful.
+    for k, v in ok { ; Loop over all the search results in "ok". "k" will be the nth result, and "v" will contain the result itself.
+        MsgBox, % "Result number " k " is located at X" v[1] " Y" v[2] " and it has a width of " v[3] " and a height of " v[4] ". Additionally it has a comment text of " v.id ; v[1] is equivalent to ok[k][1], v.id is equivalent to ok[k].id, and so on.
+    }
+} else {
+    MsgBox, The image/Text was not found. Is everything set up correctly and the image is visible in Paint? ; It seems "ok" was left empty, so nothing was found.
+}
+Example 3.
+Code: Select all - Expand - Download - Line numbers - Word wrap - V1
+
+#include <FindText>
+Text:="|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8" ; Image of the "auto" part in "autohotkey.com". Id of the image is "auto" (between < and > characters).
+Text.="|<hot>*152$29.U00010000200014000280004Hk7kzxktktVVUkX161V43A3286M24EAkA8UNUMF0lUUW1Xb1g31s1s" ; Append an image of the "hot" part in "autohotkey.com" to the Text variable (note the ".=" operator which appends, when previously we used ":=" to set). Id of the image is "hot".
+; The last two lines are the same as Text:="|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8|<hot>*152$29.U00010000200014000280004Hk7kzxktktVVUkX161V43A3286M24EAkA8UNUMF0lUUW1Xb1g31s1s"
+
+WinGetPos, pX, pY, pW, pH, ahk_class MSPaintApp ; Get the Paint application location and size.
+
+if !(ok := FindText(X, Y, pX, pY, pX+pW, pY+pH, 0.000001,, Text)) { ; Call FindText to look for either "auto" or "hot" images. X and Y will be set to X and Y coordinates for the first found result. The search range will be only the Paint application. Setting one or both of the error margins to a small non-zero value will avoid the second search with 5% error margins. Results will be stored in the "ok" variable. If "ok" doesn't contain anything ("!" is the "not" operator) then exit, otherwise continue on.
+    MsgBox, The image/Text was not found. Is everything set up correctly and the image is visible in Paint? ; It seems "ok" was left empty, so nothing was found.
+    ExitApp
+}
+; Anything after this part will happen only if any of the Text was found (either "hot" or "auto" image).
+
+for key, value in ok { ; Loop over all the search results in "ok". "key" will be the nth result, and "value" will contain the result itself.
+    FindText().MouseTip(value.x, value.y) ; Show a blinking red box at the center of the result.
+    MsgBox, % "Result number " key " is located at X" value[1] " Y" value[2] " and it has a width of " value[3] " and a height of " value[4] ". Additionally it has a comment text of " value.id ; value[1] is equivalent to ok[k][1], value.id is equivalent to ok[k].id, and so on.
+    if (value.id == "auto")
+        MsgBox, Here we found the "auto" image.
+}
+
+3) ImageSearch, PixelSearch, PixelCount
+FindText().ImageSearch is a easier-to-use wrapper function for the FindText function. It can also accept image files like the AHK native function ImageSearch (but options, such as *IconN, are not supported), and it supports different CoordModes (FindText always returns coordinates relative to the screen, but FindText().ImageSearch uses whichever CoordMode is set by the CoordMode Pixel command, such as Window or Client).
+
+FindText().ImageSearch(OutputVarX, OutputVarY, X1, Y1, X2, Y2, TextOrImage, Screenshot:=1, FindAll:=0)
+
+returnArray := FindText().ImageSearch(
+OutputVarX, OutputVarY --> the names of the variables in which to store the X and Y coordinates of the center of the found image. Coordinates are relative to the active window unless CoordMode was used to change that.
+,X1, Y1 --> The X and Y coordinates of the upper left corner of the rectangle to search. Coordinates are relative to the active window unless CoordMode was used to change that.
+,X2, Y2 --> The X and Y coordinates of the lower right corner of the rectangle to search. Coordinates are relative to the active window unless CoordMode was used to change that.
+, TextOrImage --> either FindText Text, an image file filename, or a HBITMAP handle in the format HBITMAP:*%handle%
+Optionally a pixel variation number from 0-255 can be specified with *n and a transparent color can be specified with *TransN (color can be in RGB format or color name).
+, Screenshot --> if the value is 0 then the last screenshot will be used, default is 1 (new screenshot every time)
+, FindAll --> if the value is 0, return after the first found result, default is 1 (finds all results)
+)
+
+If the search was not successful, 0 is returned. Otherwise the function returns an array containing all lookup results (returnArray[1] for first found result, returnArray[2] for second ...), any result is an associative array: {1:X, 2:Y, 3:W, 4:H, x:X+W//2, y:Y+H//2}.
+ErrorLevel will be set to 0 if the search was successful, 1 if not.
+
+Example:
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+#include <FindText>
+if FindText().ImageSearch(X,Y,,,,, A_ScriptDir "\Examples.png") ; Looks for the image in Examples.png on the screen
+    FindText().MouseTip(X, Y)
+if FindText().ImageSearch(X,Y,,,,, "|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8") ; Looks for the "auto" image contained in the Text
+    FindText().MouseTip(X, Y)
+An example using color variation of +-10 and setting black as the transparent color: FindText().ImageSearch(X,Y,,,,, "*10 *TransBlack A_ScriptDir "\Examples.png")
+
+
+FindText().PixelSearch is a FindText alternative for the built-in PixelSearch. Like the built-in version, the coordinate system depends on CoordMode, which means coordinates will be relative to the active window unless set otherwise.
+
+FindText().PixelSearch(OutputVarX, OutputVarY, x1, y1, x2, y2, ColorID, Variation:=0, ScreenShot:=1, FindAll:=0)
+
+returnArray := FindText().PixelSearch(
+OutputVarX, OutputVarY --> the names of the variables in which to store the X and Y coordinates of the first found matching pixel. Coordinates are relative to the active window unless CoordMode was used to change that.
+,X1, Y1 --> The X and Y coordinates of the upper left corner of the rectangle to search. Coordinates are relative to the active window unless CoordMode was used to change that.
+,X2, Y2 --> The X and Y coordinates of the lower right corner of the rectangle to search. Coordinates are relative to the active window unless CoordMode was used to change that.
+, ColorID --> Hexadecimal color ID to search for, by default in Red-Green-Blue (RGB) format (RRGGBB). Multiple colors are allowed by using the | character to separate them.
+, Variation --> A number between 0 and 255 (inclusive) to indicate the allowed number of shades of variation in either direction for the intensity of the red, green, and blue components of the color
+, Screenshot --> if the value is 0 then the last screenshot will be used, default is 1 (new screenshot every time)
+, FindAll --> if the value is 0 (default) return after the first found result, if 1 then finds all results. If FindAll<0, only the number of found pixels is returned.
+)
+
+If the search was not successful, 0 is returned. Otherwise the function returns an array containing all lookup results (returnArray[1] for first found result, returnArray[2] for second ...), any result is an associative array: {1:X, 2:Y, 3:W, 4:H, x:X+W//2, y:Y+H//2}.
+
+Example:
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+ok := FindText().PixelSearch(,,,,,, "0xFFFFFF|0x000000") ; FFFFFF = black, 000000 = white
+FindText().MouseTip(ok[1].x, ok[1].y) ; Displays first found black or white pixel
+FindText().PixelCount counts the number of pixels in the search area. Since the search area can be 1-pixel-sized then this can be used to check for a pixel of a certain color (or a range of colors) as well.
+
+PixelCount(x1:=0, y1:=0, x2:=0, y2:=0, ColorID:="", Variation:=0, ScreenShot:=1)
+
+out := PixelCount(
+x1:=0, y1:=0 --> The X and Y coordinates of the upper left corner of the rectangle to search. Coordinates are relative to the screen.
+, x2:=0, y2:=0 --> The X and Y coordinates of the lower right corner of the rectangle to search. Coordinates are relative to the screen.
+, ColorID:="" --> Hexadecimal color ID to search for, by default in Red-Green-Blue (RGB) format (RRGGBB). Multiple colors are allowed by using the | character to separate them. Also supports a range of colors, eg "RRGGBB-DRDGDB|RRGGBB-DRDGDB".
+, Variation:=0 --> A number between 0 and 255 (inclusive) to indicate the allowed number of shades of variation in either direction for the intensity of the red, green, and blue components of the color
+, ScreenShot:=1 --> if the value is 0 then the last screenshot will be used, default is 1 (new screenshot every time)
+)
+
+If the search was not successful, 0 is returned. Otherwise the number of pixels found is returned.
+
+Example:
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+out := FindText().PixelCount(0, 0, A_ScreenWidth, A_ScreenHeight, "FFFFFF")
+MsgBox % "The number of white pixels on the screen is " out
+
+out := FindText().PixelCount(100, 250, 100, 250, "FFFFFF")
+MsgBox % "The color at screen coordinates (100, 250) is " (out ? "" : "not ") "white."
+GetPixelColor
+There isn't a built-in method in FindText to get the pixel color of a certain pixel on the screen like we can with PixelGetColor. Fortunately we can write a wrapper function to do that:
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+GetPixelColor(x, y, screenshot:=1) {
+    if (A_CoordModePixel="Window")
+        FindText().WindowToScreen(x, y, x, y)
+    else if (A_CoordModePixel="Client")
+        FindText().ClientToScreen(x, y, x, y)
+    if (screenshot)
+        FindText().ScreenShot(x, y, x, y)  ;// x1,y1,x2,y2
+    return FindText().GetColor(x, y)
+}
+Like the built-in PixelGetColor, this wrapper function uses CoordMode Pixel coordinates. Also a new screenshot is taken every time, which could be disabled by setting the screenshot argument to 0 meaning that the pixel color would be taken from the last FindText call that took a screenshot.
+
+4) What is Text?
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+Text:="|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8" 
+; From left to right: "|" is the separator
+; "<auto>" means the id/comment of the Text is "auto"
+; "*" is the capture mode, which in this case is Gray
+; 159 is the Gray threshold value
+; 40 (between $ and .) is the width of the original image
+; 0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8 is the 64-bit representation of the image
+The Text string consists of 5 parts:
+1. The pipe character (|) is a separator for images. This means that multiple images can be joined together one after another and searched at the same time (or used for a combination search).
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+Text:="|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8" ; First set the Text variable to contain the "auto" image
+Text.="|<hot>*152$29.U00010000200014000280004Hk7kzxktktVVUkX161V43A3286M24EAkA8UNUMF0lUUW1Xb1g31s1s" ; Then append the "hot" image to Text variable using the ".=" operator
+ok:=FindText(X,Y,,,,,,,Text)
+for k, v in ok
+    FindText().MouseTip(v.x, v.y)
+is equivalent to
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+Text:="|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8|<hot>*152$29.U00010000200014000280004Hk7kzxktktVVUkX161V43A3286M24EAkA8UNUMF0lUUW1Xb1g31s1s"
+ok:=FindText(X,Y,,,,,,,Text)
+for k, v in ok
+    FindText().MouseTip(v.x, v.y)
+and will return all results for both "auto" and "hot" images.
+2. Between <> characters will be the "id" or the "comment" of the image, which can be used to give names to images. If ok:=FindText(…) is successful, then ok[1].id will contain the first found images id. The id may contain any letter, number and symbol (including all Unicode characters if using Unicode build of AHK) except ">" and newline.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+Text:="|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8" ; "<auto>" sets the id of the image to the word "auto".
+Text.="|<hot>*152$29.U00010000200014000280004Hk7kzxktktVVUkX161V43A3286M24EAkA8UNUMF0lUUW1Xb1g31s1s" ; "<hot>" sets the id of the image to the word "hot".
+ok:=FindText(X,Y,,,,,,,Text)
+for k, v in ok { ; Loop through all the results
+    if v.id == "hot" { ; Only show the location of the found image if its id is equal to "hot", ignore any results for "auto"
+MsgBox, % "The ""hot"" image was found at X:" v.x " Y:" v.y
+    }
+}
+3. Numbers and symbols between > and $ will define the mode used to search. There are 5 different modes which we will go over a bit later in the "Capture modes" section. In these examples for the image for "auto", * means Gray mode is being used and 154 is the threshold value.
+4. The number between $ and . is the pixel width of the image. This shouldn’t be changed manually, modifying should be done using the Cut buttons. In the first example, the width of the image "auto" is 40.
+5. Anything after the . character is a 64-bit text representation of the image. This shouldn’t be changed manually, modifying should be done using the Cut buttons
+6. There is an undocumented way of including err1 and err0 in Text, which will override err1 and err0 values passed into the FindText function. This can be done by adding [err1,err0] right after the id:
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+Text:="|<mycomment>[0.2,0.1]*197$15.1U8A11U8C11k8600s0700Q01U004" ; Overrides err1 to be 0.2 (20%) and err0 to be 0.1 (10%)
+ok:=FindText(X,Y,,,,,0.3,0.3,Text) ; Even though err1 and err0 are set to 0.3, instead the values 0.2 and 0.1 will be used for the search
+
+5) Capture modes
+1. Gray. In gray mode, every pixels grayscale value (from 0-255, where 0 is pure black, 255 pure white) will be compared to a threshold value. If a pixels gray value exceeds the threshold value then it will be turned into white (white=background="_"="0"), otherwise into black (black=text="o"="1"). Thus anything darker than the threshold will be black, and anything lighter white. Threshold of 255 will turn the whole image black and will match everything in the search range.
+In Text form, Gray mode is identified by the * character with the threshold value after it.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+Text:="|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8" ; The "*" after "<auto>" means that Gray mode is being used, the threshold value is 159 (found between * and $), image width is 40 pixels (found between $ and .)
+2. GrayDiff. Every pixel will be considered one by one, and if any pixel around the considered pixel (total of 8 comparisons) exceeds the pixel gray value + threshold value then the considered pixel will be turned black, otherwise it will be turned white. Essentially it brings out the edges of shapes, because the biggest gray differences are found in areas with large contrast such as edges, and areas of solid color are turned white. In Examples.png "Gray vs GrayDiff example", if we want FindText to only find the rightmost 2 squares (solid colors), then it isn’t possible with Gray mode, but GrayDiff will separate them (example below).
+In Text form, GrayDiff mode is identified by ** characters with the threshold value after it.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+#include <FindText>
+Text:="|<solidcolorbox>**50$54.zzzzzzzzzU00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001U00000001zzzzzzzzzU" 
+; "**" means GrayDiff mode, threshold is set to 50, the image in Text is 54 pixels wide
+ok:=FindText(X,Y,,,,,,,Text)
+for k, v in ok
+    FindText().MouseTip(v.x, v.y)
+3. Color. In the FindText Gui, clicking on a pixel on the image selects a color (of that pixel) and defines it as "black". Then the similarity scaler can be used to include similar colors (shades of the same color) as well, and clicking the Color2Two button will apply the changes made with the slider.
+In Text form, Color mode is identified by the hexadecimal represantation of the color selected, followed by @ and the slider value (from 0.00 to 1.00, 1.00=100% similarity).
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+Text:="|<>505050@1.00$29.U00010000200014000280004Hk7kzxktktVVUkX161V43A3286M24EAkA8UNUMF0lUUW1Xb1g31s1s" 
+; Only the color 505050 will be considered Text (black pixels)
+; Similarity is set to 1.00 (100%), so color-wise only exact matches are allowed
+4. ColorPos. Clicking on a pixel on the image will define the location of the pixel relative to the left upper corner of the image, which’s color will be used for the conversion into black-and-white. Thus this mode will find patterns of a single color, where the color is taken from a specified pixel position. As in Color mode, there is a similarity slider to allow for similar colors to be detected.
+In Text form, ColorPos is identified by # followed by a number which is the selected pixels position (from left upper corner, going from left to right, then top to bottom), then followed by @ and the slider value.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+Text:="|<>#49@0.90$47.zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz07zzzzzy07zzzwDwQ7zzzsTsyDzzzkzlwQ1w007Xsk1k00D7V11127yC2D2DwDw08T47sTs0kyA0kzlzVwQ0VzXz3szV3z7z7VzW7yDy22667wTy0A0A1szy0s0w3zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+; # means ColorPos mode
+; 49 means that the 49th pixel (from left to right, top to bottom) is considered "black". Since the image width is 47, then it is the second pixel in the second row
+; 0.90 is the similarity value (90%)
+5. ColorDiff. In the FindText Gui, clicking on a pixel on the image selects a color (of that pixel) and defines it as "black". The ColorDiff2Two button will convert the image to black-and-white using the selected color. Now the R, G and B updown boxes can be used to select an allowed difference of the color (plus or minus, but doesn't wrap around from 255 to 0 or vice-versa). For example, if the color selected was 0098D9 (hexadecimal R=00, G=98, B=D9) and the R updown was set to 1, then FindText will match colors 0098D9 and 0198D9 (but not FF98D9, since it doesn't wrap around). Then setting B to 5 would match colors between 0093D9 and 019DD9.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+Text:="|<>3F627F-00050A$51.zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzk1zzzzzzy07zzzwDzlUTzzzVzyD3zzzwDzlwM1s007yDW06000zlsE0EEVzyA0D27wDzk0VsETVzy0ADW0ADzlzVwM0VzyDwD3w4DzlzVsTsVzyDy02467zlzk0k0k7yDz0C0C0zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzw"
+; The color defined as "black" is 3F627F
+; Allowed color error margins are 00050A: 00 (0 in decimal) for red, 05 (5 in decimal) for green, 0A (10 in decimal) for blue.
+6. MultiColor. Once the FindMultiColor checkbox is clicked, then multiple pixels can be selected and FindText will look for only the selected pixels at their relative coordinates (first selected pixel will be at x=0, y=0, later pixels will be relative to that) and of their specific color. For example, if two pixels are selected in this mode, then FindText will search for only two pixels which must be of the selected colors and at the same relative coordinates. The RGB slider can be used to change the error margin. In Text form, MultiColor is identified by ## followed by a number for RGB error margin (0-255). Then after $ symbol, relative coordinates and colors for the selected pixels will follow: for example "0/0/3A8000,1/0/008000" means that two pixels of colors 3A8000 and 008000 will be searched for, and 008000 must be one pixel to the right of 3A8000.
+
+MultiColor mode can also be used to look for images saved as files. This can be done by specifying the file location instead of single pixels. This method is internally used by the FindText().ImageSearch function.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+Text:="|<>##1$0/0/3F627F,-7/1/FFFFFF"
+; ## means MultiColor mode
+; Error margin for RGB is 1
+; Matches position for colors 3F627F (± 1 for each of R, G and B: matches everything between 3E617E and 406380), if the pixel 7 positions to left and 1 position down is of color FFFFFF (± 1 for R, G and B)
+
+Text := "|<>##0$" A_ScriptDir "\Example.png" ; Using this Text in FindText would look for the image in Example.png located in the script directory, with RGB error margin set to 0
+When searching for image files, one or multiple transparent colors can be specified, meaning those colors will be ignored (similar to the built-in ImageSearch *Trans option). This can be done with the syntax ##10-RRGGBB-RRGGBB... $ C:\image.bmp.
+6) Helper functions Click, MouseTip, RangeTip, GetRange, ScreenToWindow, ScreenToClient, ClientToScreen, WindowToScreen
+1. FindText().Click(x, y, options) takes in the same arguments as AHK function Click, but it will set CoordMode Mouse to Screen for the duration of the click.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+FindText().Click(100, 200) ; Left-click at Screen coordinates x 100, y 200.
+2. FindText().MouseTip(x:="", y:="", w:=10, h:=10, d:=4) will create a flashing red square at the specified x and y coordinates to visually confirm that you are working with the correct position. Optionally the width, height, at thickness of the border can be changed.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+FindText().MouseTip(100, 200) ; Flashes a red square at Screen coordinates x 100, y 200.
+3. FindText().RangeTip(x:="", y:="", w:="", h:="", color:="Red", d:=2) is a more general variant of MouseTip, where it will show a red box of the desired size, color, and border thickness. Note that it won’t automatically disappear like MouseTip. The following example will create a flashing rectangle around the edges of the found image.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+if (ok:=FindText(X,Y,,,,,,,"|<hot>*152$29.U00010000200014000280004Hk7kzxktktVVUkX161V43A3286M24EAkA8UNUMF0lUUW1Xb1g31s1s")) {
+    Loop 4
+    {
+        FindText().RangeTip(ok[1].1, ok[1].2, ok[1].3, ok[1].4, (A_Index & 1 ? "Red":"Blue"), 4) ; Show a rectangle around the edges of the found image, additionally switch the color between red and blue every 0.5 seconds.
+        Sleep, 500
+    }
+}
+4. FindText().GetRange(key:="RButton", tip:="", mode:=0, width:=20, height:=8) allows the user to select a region or a point on the screen. If mode=0 then it's done with a blinking box like the one in the FindText main GUI when capturing Text, if mode=1 then only a single point can be selected without a blinking box. Key specifies the key that must be pressed twice (or if mode=1 then once) to end the capturing. Tip is the tooltip text displayed along with the current mouse coordinates. Width and height specify the size of the blinking box.
+GetRange returns an array [x1,y1,x2,y2,winID] where (x1;y1) is the top left corner and (x2;y2) is the bottom right corner of the captured area in screen coordinates, and winID is the window ID that was under the cursor when capturing.
+5. ScreenToClient, ScreenToWindow, WindowToScreen, ClientToScreen convert coordinates between different CoordModes.
+FindText().ScreenToClient(outX, outY, x1, y1, ahk_id:="") will convert x1 and y1 from screen coordinates to client coordinates relative to the window with id of ahk_id, and it will set outX and outY to the resulting values. This is for example useful with ControlClick: FindText will return coordinates relative to the screen, but ControlClick uses coordinates relative to the window, thus ScreenToWindow could be used.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+if (ok:=FindText(X,Y,,,,,,,"|<hot>*152$29.U00010000200014000280004Hk7kzxktktVVUkX161V43A3286M24EAkA8UNUMF0lUUW1Xb1g31s1s")) {
+    FindText().ScreenToWindow(outX, outY, X, Y, WinExist("ahk_class MSPaintApp")) ; Convert the absolute coordinates X and Y to be relative to the Paint window, resulting values will be inside outX and outY variables
+    ControlClick, X%outX% Y%outY%, ahk_class MSPaintApp ; Now click the coordinates in Paint
+}
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+FindText().WindowToScreen(outX2, outY2, 200, 300) ; If ahk_id is not specified, then the active window will be used: converts relative coordinates X200 Y300 to absolute coordinates and sets outX2 and outY2 to the resulting values.
+
+7) Text library functions PicLib, PicN, PicX, PicInfo
+1. PicLib can be used to create a image/text libraries for easy fetching of Text using Text ids (comments).
+FindText().PicLib(commentOrText, addToLib:=0, libraryIndex:=1)
+
+New Text can be added by setting addToLib to 1, and libraryIndex to specify the library number into which to add the Text. If multiple Text have the same id, then only the last one is added.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+FindText().PicLib("|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8", 1) ; Adds "auto" Text into library 1 (the default library)
+FindText().PicLib("|<hot>*152$29.U00010000200014000280004Hk7kzxktktVVUkX161V43A3286M24EAkA8UNUMF0lUUW1Xb1g31s1s",1,2) ; Adds "hot" Text into library 2
+Text can be fetched from libraries by their id, addToLib must be 0 (the default value). Multiple ids can be fetched at the same time, separated by | ("comment1|comment2|...").
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+MsgBox, % "Fetching ""auto"" from library 1: " FindText().PicLib("auto") ; fetches Text with the id of "auto" from library 1
+MsgBox, % "Fetching ""hot"" from library 2: " FindText().PicLib("hot",,2) ; fetches "hot" from library 2
+MsgBox, % "Fetching ""hot"" from library 3: " FindText().PicLib("hot",,3) ; returns nothing, because "hot" was added into library 2, not library 3
+2. PicN(Comment, libraryIndex:=1) decomposes a string into its characters and then uses PicLib to get the Text. This is useful for doing combination searches.
+PicN("hot") is equivalent to PicLib("h|o|t"), resulting in Text for ids of "h", "o", and "t".
+3. PicX(Text) slices a Text containing a word into multiple Text containing the separate characters. So if the Text contains an image of the word "this", then it will return a Text containing 4 images of the individual characters ("t","h","i","s"), separated by |. This is useful if the spacing between the characters might change (for example if a webpage renders a little bit different each time), because then we can slice up the word into its characters and do a combination lookup instead (which allows for variable spacing between characters).
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+MsgBox, % "Sliced ""hot"" into characters: " FindText().PicX("|<hot>*152$29.U00010000200014000280004Hk7kzxktktVVUkX161V43A3286M24EAkA8UNUMF0lUUW1Xb1g31s1s")
+4. PicInfo(Text) returns low-level info about the Text. The following array is returned:
+Code: Select all - Expand - Download - Line numbers - Word wrap - V1
+
+[v, w, h, len1, len0, e1, e0 , mode, color, n, comment, seterr]
+v --> Text in 0 and 1 form
+w --> width of Text
+h --> height of Text
+len1 --> number of "1"s in Text
+len0 --> number of "0"s in Text
+e1 --> allowed error margin for "1"s in absolute numbers (returns % of len1)
+e0 --> allowed error margin for "0"s in absolute numbers (returns % of len0)
+mode --> 0 = Color or undefined, 1 = Gray, 2 = GrayDiff, 3 = ColorPos, 4 = ColorDiff, 5 = MultiColor or external file
+color --> color for Color mode
+n --> number of colors in MultiColor
+comment --> comment/id of Text
+seterr --> if error margins were set in the Text or not
+Example:
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+#include <FindText>
+Text:="|<mycomment>[0.1,0.1]*197$15.1U8A11U8C11k8600s0700Q01U004"
+info := FindText().PicInfo(Text)
+MsgBox, % "v: " info[1] "`nw: " info[2] "`nh: " info[3] "`nlen1: " info[4] "`nlen0: " info[5] "`ne1: " info[6] "`ne0: " info[7] "`nmode: " info[8] "`ncolor: " info[9] "`nn: " info[10] "`ncomment: " info[11] "`nseterr: " info[12]
+
+8) FindText combination lookup
+A combination lookup can be done by setting the JoinText argument to 1, or specifying an array of words to find. Then offsetX and offsetY will be the maximum offset which the images are allowed to be relative to each other. If successful, then the returned results id will be the combination of ids used for the search (in the following example, ok[1].id == "autohot")
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+Text:="|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8"
+Text.="|<hot>*152$29.U00010000200014000280004Hk7kzxktktVVUkX161V43A3286M24EAkA8UNUMF0lUUW1Xb1g31s1s"
+MsgBox, Looking for "auto" and "hot"
+ok:=FindText(X,Y,,,,,,,Text) ; FindText will return all locations of both "auto" and "key" separately
+for k, v in ok
+    FindText().MouseTip(v.x, v.y)
+MsgBox, Looking for "auto" followed by "hot"
+ok:=FindText(X,Y,,,,,,,Text,,,1) ; FindText will return all locations of "auto" followed by "key", where "key" can be a maximum of 20 pixels away from "auto" in the x-axis and 10 pixels away in the y-axis
+for k, v in ok
+    FindText().MouseTip(v.x, v.y)
+If you create a character library, then it is possible to search for words using combination lookup.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+; first lets add images of letters "a" and "s" to the default image library
+FindText().PicLib("|<a>**50$9.TXz0MzTzXkT7TtvU", 1)
+FindText().PicLib("|<s>**50$8.DbzXs7kz0wDzTc", 1)
+
+FindText(X, Y,,,,, 0.15, 0.15, FindText().PicN("sas"),,,1,5,3) ; FindText().PicN("sas") assembles Text for the word "sas" using our image library. Error margins were set to 15%, because all the "a" and "s" characters differ a little bit and with 15% all instances of them will be found. OffsetX=5 and OffsetY=3, because the default offset values are too large for this case.
+FindText().MouseTip(X, Y)
+FindText(X, Y,,,,, 0.15, 0.15, FindText().PicN("asa"),,,1,5,3) ; looks for the word "asa"
+FindText().MouseTip(X, Y)
+Sometimes multiple images for the same character are required, for example when dealing with different fonts, or different rendering in browsers, or anti-aliasing. In that case we can provide the character set in the Text variable, and then provide search words as an array in the JoinText argument. Regular JoinText can only use one font.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+Text:="|<A>*162$7.472VF4WzkMA"
+Text.="|<A>*165$8.61UI92NWTYD1U"
+Text.="|<s>**50$5.Tb3klz"
+Text.="|<s>**50$5.Tb3klx"
+Text.="|<a>**50$6.SH3TnnTU"
+Text.="|<a>*152$5.x4/slz"
+; Text now contains two fonts of "A", "s" and "a"
+ok:=FindText(X, Y, , , , , 0.1, 0.1, Text,, 1,["Asa"]) ; FindText will find all instances of the word "Asa" using the provided character set
+for k, v in ok
+    FindText().MouseTip(v.x, v.y)
+
+9) Optical character recognition (OCR)
+A basic optical character recognizer (OCR) can be implemented using the FindText().OCR function. This can be used after locating all the characters in a character set.
+
+FindText().Ocr(
+Ok --> takes the result returned by FindText()
+, offsetX:=20, offsetY:=20 --> maximum offsets for x and y. If this is exceeded then a * sign will be inserted. Default values are 20 and 20.
+, overlapW:=0 --> maximum overlap of images, default is 0
+)
+Returns an association array: {text:text, x:X, y:Y, w:W, h:H}
+
+Example using Examples.bmp:
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+ ; first lets add images of letters "a" and "s" to the default image library
+FindText().PicLib("|<a>**50$9.TXz0MzTzXkT7TtvU", 1)
+FindText().PicLib("|<s>**50$8.DbzXs7kz0wDzTc", 1)
+; find all "a" and "s" characters on the screen using our library
+ok:=FindText(X, Y,,,,, 0.15, 0.15, FindText().PicN("sa"))
+if (ocr := FindText().OCR(ok, 3, 3))
+MsgBox, % "Found " ocr.text ; should return "aaa*sss*asa*sas
+A more advanced example implementing a search function for Notepad. For this example, open Notepad and set the font (in the menubar Format -> Font...) to Consolas, Regular, 11. Fill Notepad with some example text. Then run the following example and press F1, which brings up a search dialog. Of course in Notepad Ctrl+F is far superior, because this FindText function can only find text visible in the Notepad window, but something similar could be used for example in games to look for text.
+Code: Select all - Expand - Download - Line numbers - Word wrap - V1
+
+#NoEnv
+#SingleInstance Force
+
+#include <FindText>
+
+; First some character sets for numbers, uppercase characters and lowercase characters (taken from Notepad font Consolas, Regular, 11)
+
+if (A_ScreenDPI = 96) {
+	numbers := "|<0>**50$8.03laNwTDyyBWNXk0U|<1>**50$7.06D5UkMA631Xy0U|<2>**50$7.0DAkMA667773y0U|<3>**50$6.0y333S3333y0U|<4>**50$8.00sS7XMaNgPz1UM0U|<5>**50$6.0zkkky3333y0U|<6>**50$7.07a631ynMwSNs0U|<7>**50$7.0TkMMAA66331U0U|<8>**50$7.0DgqPgwzNwSNs0U|<9>**50$8.03laFgBbDkM637U0U"
+	uppercase := "|<A>*150$8.61kI92MWMbt3kE0008|<B>*150$6.yXVXyXVVXy000U|<C>*150$6.DEkUUUUkED000U|<D>*150$7.yFcIC73VkcrU000E|<E>*150$5.z24DkV27k01|<F>*150$5.z248TV24001|<G>*150$6.DEUUUbVVlD000U|<H>*150$6.VVVVzVVVVV000U|<I>*150$6.zAAAAAAAAz000U|<J>*150$4.wF4F4Fs02|<K>*150$7.VF9YXVkYH8oA000E|<L>*150$5.V248EV27k01|<M>*150$8.EaRbNphNqQ71kE0008|<N>*150$6.lltddZZXXX000U|<O>*150$7.SNcIC73Vkgnk000E|<P>*150$6.yXVVXyUUUU000U|<Q>*150$7.SNcIC73VkgnkE93k|<R>*150$7.yNgKPtgmNAKA000E|<S>*150$6.TkUkQ6113y000U|<T>*150$7.za31UkMA631U000E|<U>*150$6.VVVVVVVVnS000U|<V>*150$7.UksK/AYGD31U000E|<W>*150$7.UkMAirOdNgqM000E|<X>*150$6.VnGSAASGnV000U|<Y>*150$7.VkgnEsMA631U000E|<Z>*150$6.z1264A8EEz000U"
+	lowercase := "|<a>**50$6.00Sn3Tnnz00U|<b>**50$7.kMDrP7XltjU01|<c>**50$6.00DskkksT00U|<d>**50$6.33TnnXnrT00U|<e>**50$7.007aP7zkM7k01|<f>**50$7.631bwMA631U01|<g>**50$8.000zNaNaT61yMyC|<h>**50$6.kkzvnnnnn00U|<i>**50$7.A0D1UkMA6Ds01|<j>**50$5.63slX6AMtk|<k>**50$7.kMAynlsyPgs01|<l>**50$7.A631UkMA6Ds01|<m>*150$7.00CqiL/ZmtM01|<n>**50$6.00zvnnnnn00U|<o>**50$8.000wNYD3kqMw002|<p>**50$7.00DrP7Xltja31|<q>**50$6.00TnnXnrT33U|<r>**50$7.00DrD7UkMA001|<s>**50$6.00TksS33y00U|<t>**50$8.A33zA30kA3UT002|<u>**50$6.00nnnnnnT00U|<v>**50$8.0033NaMaD3kM002|<w>**50$8.0033kxjPLqta002|<x>**50$8.001bBXkMD6Pb002|<y>**50$8.0033NaMYD3kM632|<z>**50$7.00DkMMM8ADs01"
+
+} else if (A_ScreenDPI = 144) {
+	numbers :="|<0>*139$10.7Uza6MD1wDnjQz3sD0q6DkS8|<1>*139$9.73sv4M30M30M30M30MzzzU|<2>*139$9.D7wlk60k61UQ71kQ70zzzU|<3>*139$8.TDu70kA6D3s30E43zjm|<4>*139$11.1k3UD0q1g6MMkVX37zzzUM0k1W|<5>*139$9.zryk60k60z7y0k70kCzbsU|<6>*139$10.3sTXUM1U5wzvVw3kBUq6DsS8|<7>*139$10.zzzk30M1UA0k60M30A1U60k8|<8>*139$10.7lza6MBVbCDkT7CMD0y7Tsz8|<9>*139$10.7Vz66kP0w3sRznv081UATVw8"
+	uppercase := "|<A>**50$12.000000003k3k3s7M6M6QCQCAACTyTyM7s7s30000000000U|<B>**50$10.0000003zDysvVy6svzDyszVy7sTzjw000000008|<C>**50$10.0000000TXzSDUC0s30A0s3UC0SAzly000000008|<D>**50$11.0000000DsTwkxUv0y1w3s7kDUP1q7jyTk000000000E|<E>**50$9.000000zzzk60k60zryk60k60zzz00000004|<F>**50$9.000000zzzk60k60zryk60k60k6000000004|<G>**50$11.00000000z3zC6s1k30CDwTs6sBkPknzVy000000000E|<H>**50$10.00000030w3kD0w3kDzzzkD0w3kD0w3000000008|<I>**50$9.000000zzz60k60k60k60k60kzzz00000004|<J>**50$8.00000Dzz1kQ71kQ71kQ7Xjvw0000002|<K>**50$10.0000003VyCsnbCsz3sDUz3iCQsvXi7000000008|<L>**50$9.000000s70s70s70s70s70s70zzz00000004|<M>**50$12.00000000QCQCKOSSSLPrPrPrtbs7s7s7s7s70000000000U|<N>**50$10.0000003Uz3wDsxXrDgyntjayTszXy7000000008|<O>**50$12.000000007sDwSSQ6M7s7s7s7s7M7QCSSDw7s0000000000U|<P>**50$10.0000003zDyszVy3sTXzyzXUC0s3UC0000000008|<Q>**50$12.000000007sDwSSQ6M7s7s7s7s7M7QCSSDw7s1U1n0z0S00U|<R>**50$10.0000003yDwlv3gClnyDknX7AQkv3g7000000008|<S>**50$10.0000000z7ywPUC0S0y0y0w1k7kTzbw000000008|<T>**50$10.0000003zzz30A0k30A0k30A0k30A0k000000008|<U>**50$10.00000030w3kD0w3kD0w3kD0y7sxzXw000000008|<V>**50$12.00000000s3s7M6Q6QCACCACQ6Q6M7s3s3k3k0000000000U|<W>**50$11.k7UD0y1w3tbnjjPSqxhDSSwxsu|<X>**50$11.sDktnVr3w3k7UD0z1y7CCCsRUS|<Y>**50$11.kDUTVnX7C7MDkD0C0M0k1U3062|<Z>**50$10.0000003zzz0M3UQ1UC0k60s30M3zzz000000008"
+	lowercase := "|<a>**50$10.000000003wTtVk7Dxzy7sTXrzDQ0000008|<b>**50$10.03UC0s3UCwzvty7sDUy3sTXzyTU0000008|<c>**50$10.000000001yDxsr0M3UC0M1knz7s0000008|<d>**50$10.001k70Q1lzTxly7sT1y7sTbrzDQ0000008|<e>**50$10.000000001wTtly3zzzy0s1k7zDw0000008|<f>**50$11.003wDss1k3UzxzsQ0s1k3U70C0Q0s00000002|<g>**50$11.0000000007zTytnVX77yDss1k3zXzi3wCzwzW|<h>**50$10.03UC0s3UCwzvtz7sTVy7sTVy7sQ0000008|<i>**50$9.71s70007sz0s70s70s70szzz000000U|<j>**50$9.1kD1k003yTk60k60k60k60k60qCzXsU|<k>**50$9.060k60k67lqQr7ky6sr6Qlq7000000U|<l>**50$9.07sz0s70s70s70s70s70szzz000000U|<m>**50$11.000000000TizxrTCyNwntbnDaTAyNk0000002|<n>**50$10.00000000Cwzvtz7sTVy7sTVy7sQ0000008|<o>**50$10.000000003wTvny7kD0w3sTnryDk0000008|<p>**50$10.00000000Cwzvty7sDUy3sTXzyzXUC0s3U8|<q>**50$10.000000001zTxly7sT1y7sTbrzDQ1k70Q1s|<r>**50$9.00000006yzzbsS0k60k60k60000000U|<s>**50$9.00000003wzr6s7UTUS0y6zrw000000U|<t>**50$11.0000A0s1kTzzyC0Q0s1k3U7070DsDk0000002|<u>**50$10.00000000C7sTVy7sTVy7sRrrzDQ0000008|<v>**50$10.00000000A3sTVq6QsnXADkO1s7U0000008|<w>**50$12.0000000000s3s7s7NbNqPqPqOKSSSSCS00000000U|<x>**50$10.00000000C7QRnXw7US1wDlnb7sQ0000008|<y>**50$12.0000000000M7QCQCAACQ6M7M7s3k3k1U3U70z0w0U|<z>**50$10.000000007zTs3UQ1UA1UC1k7zzw0000008"
+} else {
+	MsgBox, Your current screen DPI is not supported! Exiting...
+	ExitApp
+}
+
+characterset := lowercase . uppercase . numbers
+; Add our newly created character set to PicLib library
+FindText().PicLib(characterset, 1)
+
+return
+
+F1::
+InputBox, searchPhrase, Search Notepad, % "Search Notepad for some text. To make the search case sensitive, put the search term in quotes."
+Sleep, 500 ; Sometimes the InputBox closing animation is slow causes the search to fail, so wait for it to close
+
+caseSensitive := (SubStr(searchPhrase,1,1) == """") && (SubStr(searchPhrase,0) == """")
+if caseSensitive
+searchPhrase := SubStr(searchPhrase,2,-1) ; For case-sensitive search remove double-quotes
+else
+StringLower, searchPhrase, searchPhrase ; For case-insensitive search, turn the search phrase into lowercase
+
+if (ok:=FindText(X, Y,,,,, 0, 0, caseSensitive ? FindText().PicN(searchPhrase) : RegexReplace(characterset, "(?<=<)\p{L}(?=>)", "$L0"),1,1, caseSensitive ? 1 : [searchPhrase])) ; If doing a case-sensitive search, glue together the images for each character in searchphrase using PicN and use FindAll=1 to look for the resulting image. If doing case-insensitive search, replace all uppercase characters in our character set with lowercase characters (which means that FindText will use both uppercase and lowercase images in the search) and then look for the lowercase searchphrase.
+{
+FindText().MouseTip(X, Y)
+ ; FindText().Click(X, Y, "L")
+}
+return
+
+10) BindWindow - peeking behind windows
+BindWindow allows FindText to search for Text in windows hidden behind other windows.
+FindText().BindWindow(
+bind_id -> takes the ahk_id of the target window (this can be get for example with WinExist()). If set to 0 then BindWindow is disabled and the screen will be searched normally.
+, bind_mode -> specifies the method of binding. Some windows support some methods, other windows need other methods. Odd-numbered bind_mode modifies a transparent window to search in it. Usually bind_mode 0 or 4 work, default is 0.
+, get_id -> if set to 1, then the currently binded window id will be returned, default is 0.
+, get_mode -> -> if set to 1, then the currently used bind mode will be returned, default is 0.
+)
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+SetTitleMatchMode, 2
+FindText().BindWindow(WinExist("Paint ahk_class MSPaintApp")) ; bind FindText to Paint
+Text:="|<hot>*152$29.U00010000200014000280004Hk7kzxktktVVUkX161V43A3286M24EAkA8UNUMF0lUUW1Xb1g31s1s"
+FindText(X, Y, 72-150000, 228-150000, 72+150000, 228+150000, 0, 0, Text) ; Paint can be obscured by another window, but FindText still finds Text
+FindText().MouseTip(X, Y)
+FindText().BindWindow(0) ; unbind Paint from FindText
+NOTE! BindWindow will be set globally for all FindText functions in the running script. If multiple threads are used, then a new thread can overwrite the binded window for an older thread (for example one hotkey binds a window and loops FindText, then is interrupted by another hotkey which binds another window). This can be avoided by using FindTextClass, which is discussed next.
+
+
+11) FindTextClass
+Every function of FindText is contained in a class named FindTextClass. FindText() returns a globally shared instance of the FindTextClass, and thus every function of FindTextClass operates on the same dataset. For example BindWindow changes the binded window for every FindText call, Screenshot=0 will use the last created screenshot by any FindText call etc. Also FindText(arguments) is the same as FindText().FindText(arguments).
+
+For this example, open "Examples.png" in Paint, then hide the image by moving another window on top of it. Press F1, which should MouseTip the location of the found image. After pressing F2, the image cannot be found anymore.
+Code: Select all - Expand - Download - Line numbers - Word wrap - V1
+
+ #NoEnv
+#SingleInstance Force
+
+#include <FindText>
+
+Esc::ExitApp
+
+F1::
+FindText().BindWindow(WinExist("Examples.png - Paint"))
+Text:="|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8"
+while (ok:=FindText(X, Y,,,,, 0, 0, Text)) {
+FindText().MouseTip(X, Y)
+Sleep, 1000
+}
+MsgBox, Paint not found anymore!
+return
+
+F2::
+FindText().BindWindow(0) ; or bind another window?
+return
+This can be fixed by using a new instance of FindTextClass:
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+ F1::
+ft := new FindTextClass
+ft.BindWindow(WinExist("Examples.png - Paint"))
+Text:="|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8"
+while (ok:=ft.FindText(X, Y,,,,, 0, 0, Text)) {
+ft.MouseTip(X, Y)
+Sleep, 1000
+}
+MsgBox, Paint not found anymore!
+return
+
+12) Screenshot functions: ScreenShot, GetColor, SetColor, GetTextFromScreen, SavePic, ShowPic, ShowScreenShot
+1. FindText().ScreenShot(x1:=0, y1:=0, x2:=0, y2:=0)
+Takes a FindText internal screenshot between points x1,y1 and x2,y2 to be used in later FindText calls.
+2. RGB := FindText().GetColor(x, y, fmt:=1)
+Gets the RGB color of a point from the last screenshot. If fmt=0 then the raw data will be returned, otherwise the color in RGB format.
+3. FindText().SetColor(x, y, color)
+Sets the RGB color of a point in the last screenshot.
+4. Text := FindText().GetTextFromScreen(x1:=0, y1:=0, x2:=0, y2:=0, Threshold="", ScreenShot:=1, outX, outY)
+Converts a screenshot region between points x1,y1 and x2,y2 to Text using the specified threshold. Threshold can be "*" for Gray mode or "**" for GrayDiff mode followed by the threshold value. ScreenShot = 1 will take a new screenshot, 0 uses the last internal screenshot (for example taken by the ScreenShot function). The Text will be automatically cropped from top and bottow. Variables outX and outY will be set to contain the middle point for captured Text on the screen.
+5. FindText().SavePic(FileName, x1:=0, y1:=0, x2:=0, y2:=0, ScreenShot:=1)
+Saves a region between points x1,y1 and x2,y2 of a screenshot to a file.
+6. FindText().ShowPic(FileName:="", show:=1, outX, outY, outW, outH)
+Shows an image file content in the top left corner of the screen. outX and outY will be set to X and Y coordinates where the image will be shown (on a multiple-screen setup this coordinate might not be 0,0), outW and outH to the images width and height. Calling ShowPic() without specifying FileName will remove the image from screen. FileName can also be a HBITMAP handle in the format HBITMAP:*%handle%.
+7. FindText().ShowScreenShot(x1:=0, y1:=0, x2:=0, y2:=0, ScreenShot:=1)
+As with the ShowPic function shows a region between points x1,y1 and x2,y2. If ScreenShot is 1 then a new screenshot will be taken, otherwise the last internal screenshot is used.
+
+Example:
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+#include <FindText>
+FindText().Screenshot(100,100,500,500) ; Take a new screenshot between coordinates 100,100 and 500,500
+FindText().ShowScreenShot(100, 100,500, 500, 0) ; Shows the taken screenshot on the screen. Since we specified 0 as the last argument, the function will use the screenshot taken previously by the Screenshot function.
+Sleep, 3000
+FindText().ShowScreenShot() ; Hide the screenshot after 3 seconds
+FindText().SavePic(A_ScriptDir "\TestScreenShot.png", 100, 100, 400, 400, 0) ; Save a portion of the taken screenshot into a file in the script directory.
+
+13) Miscellaneous: Sort, Sort2, Sort3, WaitChange, WaitNotChange, zoom arguments
+1. FindText().Sort(ok, dy:=10)
+Takes in a FindText result array (ok) and returns a sorted array from left to right -> top to bottom. Comparison point is the middle of images (not upper left corner!), and slight differences in y position can be ignored by changing dy value.
+2. FindText().Sort2(ok, px, py)
+Takes in a FindText result array (ok) and one coordinate (px, py), and sorts the array by how far away the returned image is from the coordinate using the formula (x-px)^2 + (y-py)^2.
+3. FindText().Sort3(ok, dir:=1)
+Takes in a FindText result array (ok) and sorts it by direction. Dir takes in the same values as FindText dir argument (except 9).
+4. FindText().WaitChange(WaitTime:=-1, x1:=0, y1:=0, x2:=0, y2:=0)
+Waits "WaitTime" seconds for a region of the screen between coordinates x1,y1 and x2,y2 to change. Specifiying "WaitTime" as -1 will wait indefinitely.
+5. FindText().WaitNotChange(NoChangeTime:=1, WaitTime:=30, x1:=0, y1:=0, x2:=0, y2:=0)
+Waits for WaitTime seconds (default 30s) for the image to not change for NoChangeTime seconds (default 1s). Returns 1 if the image didn't change (stabilized) for NoChangeTime seconds, otherwise if WaitTime is reached then 0 is returned.
+
+The last two arguments of FindText, zoomW and zoomH, may be used to scale the Text bigger or smaller. This can be used to find images which change in size: for example buttons/elements which get bigger/smaller depending on the size of the window, or if screen scaling is changed. For the following example code, open Examples.png in Paint and set the image zoom level to 200% in the bottom right corner. Then try setting the zoom to 300% and change zoomW and zoomH to 3 - the example should still work.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+#include <FindText>
+
+if (ok := FindText(outX, outY, 0, 0, A_ScreenWidth, A_ScreenHeight, 0.05, 0.05, "|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8",, 0,,,,, 2, 2)) { ; Call FindText to look for the "auto" image at 200% zoom
+    for k, v in ok { ; Loop over all the search results in "ok". "k" will be the nth result, and "v" will contain the result itself.
+        MsgBox, % "Result number " k " is located at X" v[1] " Y" v[2] " and it has a width of " v[3] " and a height of " v[4] ". Additionally it has a comment text of " v.id ; v[1] is equivalent to ok[k][1], v.id is equivalent to ok[k].id, and so on.
+        FindText().MouseTip(outX, outY)
+    }
+} else {
+    MsgBox, The image/Text was not found. Is everything set up correctly and the image is visible in Paint? ; It seems "ok" was left empty, so nothing was found.
+}
+
+14) FindText speed improvement tips
+1. Use the smallest search range possible. This can be done in many ways, the simplest is limiting the search to a single window by using WinGetPos to get the window position and size.
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+WinGetPos, pX, pY, pW, pH, ahk_class MSPaintApp ; Get the Paint application location and size.
+ok := FindText(X, Y, pX, pY, pX+pW, pY+pH,,, Text) ; Set the search range to only the Paint window
+Sometimes the searched image will show up in only specific regions, so the search range can be further adjusted. In the Paint window, if we are not interested in the menubar nor the toolbar, then we can crop by some amount from the top:
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+WinGetPos, pX, pY, pW, pH, ahk_class MSPaintApp ; Get the Paint application location and size.
+ok := FindText(X, Y, pX, pY+150, pX+pW, pY+pH,,, Text) ; Set the search range to only the Paint window and crop by 150 pixels from the top to leave out the menubar and toolbar
+2. Use the smallest image possible. This can be done by cropping the captured image with the L3/R3/L/R/U/B/Auto cropping buttons.
+3. Use the smallest error margings possible. For example, raising both err1 and err0 from 0 to 0.3 might result in noticeably slower searches (perhaps 5-10x slower).
+4. If looking for an exact match, specify a very small non-zero value for err1, err0, or both. The default action of FindText is that if err1 and err0 are both set to 0, then if the search fails, it will automatically be tried again with err1 and err0 set to 0.05. When doing many FindText calls to look for different images, this extra searching will add up time-wise. But this only happens when err1 and err0 are exactly 0, which means if you put for example 0.000001 (which is effectively 0 but does not equal 0) for err1, err0, or both (just one needs to be non-zero), then only one search will happen (with effective error margins of 0.000001≈0).
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+FindText(X, Y,,,,,,, Text) ; If Text is not visible on the screen, then the search happens twice: first with err1 and err0 set to 0, then again with 0.05 (5% error margin)
+FindText(X, Y,,,,,0.000001,, Text) ; If Text is not visible on the screen, then the search happens just once, looking for an exact match (0.000001≈0)
+FindText(X, Y,,,,,0.05,0.05, Text) ; If Text is not visible on the screen, then the search happens just once, but leaves a small error margin of 5%
+5. If doing searches for multiple images, either combine the Text into one and do just one FindText call, or set the Screenshot argument to 0 for subsequent searches. This avoids FindText from taking multiple screenshots, which takes a significant amount of time.
+Example of using the combining method:
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+Text:="|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8"
+Text.="|<hot>*152$29.U00010000200014000280004Hk7kzxktktVVUkX161V43A3286M24EAkA8UNUMF0lUUW1Xb1g31s1s"
+if (ok := FindText(X, Y,,,,,,, Text)) {
+    if (ok[1].id == "auto") {
+        ; Do something after finding the "auto" image
+    } else if (ok[1].id == "hot") {
+        ; Do something after finding the "hot" image
+    }
+}
+Example of reusing the first screenshot:
+Code: Select all - Download - Line numbers - Word wrap - V1
+
+FindText().PicLib("|<auto>*159$40.0000k000003000000A00DVUnw7lr6371nUAMAA630FUkkkAT63330rgMAAA1kFUkkkD363330wAAAA62vkvkkQtt1v1kS8",1)
+FindText().PicLib("|<hot>*152$29.U00010000200014000280004Hk7kzxktktVVUkX161V43A3286M24EAkA8UNUMF0lUUW1Xb1g31s1s",1)
+if (ok := FindText(X, Y,,,,,,, FindText().PicLib("auto"))) {
+    ; Do something after finding the "auto" image
+}
+if (ok := FindText(X, Y,,,,,,, FindText().PicLib("hot"), 0)) { ; Call FindText using the screenshot taken previously for searching "auto"
+    ; Do something after finding the "hot" image
+}
+6. Use capture modes that require the least pixel comparisons. Usually Gray mode is the fastest option; GrayDiff, ColorPos, and Color mode (with similarity set to 100%) are also quite fast. The slowest are Color mode (the larger the color range or the lower the similarity -> the slower the search) and MultiColor (if using an image file).
+This is all for now. Thank you for reading 😊
+Code: Select all - Expand - Download - Line numbers - Word wrap - V1
+
+Update history:
+09.05.22: 1) Added explanations for ScreenShot, GetTextFromScreen, SavePic, ShowPic, ShowScreenShot, WaitChange, PicInfo.
+2) Specified that MultiColor mode can also use filenames.
+3) Added an advanced OCR example.
+17.05.22: 1) Added section "FindText speed improvement tips"
+2) Added more examples under the main FindText function explanation
+3) Added ColorDiff mode explanation
+4) Corrected typos and made some wordings better.
+31.08.22: fixed incorrect DPI for examples (150% is correct)
+01.08.23: added explanations for WaitNotChange, GetRange, PixelSearch. Changed documentation for ImageSearch to include variation and transparent color options.
+19.02.24: added documentation for PixelCount.
+20.02.24: added documentation for GetColor, SetColor.

@@ -1,0 +1,67 @@
+FindText OCR Quick Reference
+
+## Text Extraction from Screen
+GetTextFromScreen(x1, y1, x2, y2, Threshold, ScreenShot:=1, &rx, &ry, cut:=1)
+- Extracts actual text from screen region between (x1,y1) and (x2,y2)
+- Returns the extracted text as string
+- Threshold modes:
+  - "*150" = Gray mode with threshold 150 (0-255, darker<threshold=black)
+  - "**50" = GrayDiff mode with threshold 50 (edge detection)
+  - "" = Auto-threshold (recommended for mixed content)
+- ScreenShot=1 takes new screenshot, 0 uses last screenshot
+- rx,ry return middle point coordinates of captured text
+- cut=1 auto-crops whitespace from top/bottom
+
+## Basic Usage Examples
+```ahk
+; Extract price from specific region
+priceText := FindText().GetTextFromScreen(100, 200, 300, 250, "*150")
+
+; Extract with auto-threshold
+text := FindText().GetTextFromScreen(x1, y1, x2, y2, "")
+
+; Use existing screenshot (faster for multiple extractions)
+FindText().ScreenShot(0, 0, 1920, 1080)  ; Take screenshot once
+text1 := FindText().GetTextFromScreen(100, 100, 200, 150, "*150", 0)
+text2 := FindText().GetTextFromScreen(300, 200, 400, 250, "*150", 0)
+```
+
+## Threshold Selection Guide
+- Gray mode (*N): Good for dark text on light backgrounds
+  - *150 = typical for black text on white
+  - *100 = for lighter gray text  
+  - *200 = for very dark text only
+- GrayDiff mode (**N): Good for mixed backgrounds/edge detection
+  - **50 = typical edge detection threshold
+- Auto ("") = Let FindText choose threshold automatically
+
+## Performance Tips
+- Use smallest possible region (x1,y1,x2,y2)
+- Reuse screenshots with ScreenShot=0 for multiple extractions
+- Try auto-threshold ("") first, then manual if needed
+
+## Integration Pattern for Price Extraction
+```ahk
+; 1. Find "Add to Cart" button region first
+if (ok := FindText(X, Y, x1, y1, x2, y2, 0.1, 0.1, addToCartPattern)) {
+    ; 2. Extract price from known relative position
+    priceX := X - 200  ; Adjust based on page layout
+    priceY := Y - 50
+    priceText := FindText().GetTextFromScreen(priceX, priceY, priceX+100, priceY+30, "*150")
+    
+    ; 3. Clean and parse price
+    priceText := RegExReplace(priceText, "[^0-9.]", "")  ; Remove non-numeric
+    price := Float(priceText)
+}
+```
+
+## Character Recognition (OCR)
+For full OCR with character libraries:
+1. Create character set with PicLib
+2. Use FindText to locate all characters
+3. Use OCR() to assemble into text
+4. Use combination search for words
+
+OCR(ok, offsetX:=20, offsetY:=20, overlapW:=0)
+- Takes FindText results and assembles into readable text
+- Returns {text:text, x:X, y:Y, w:W, h:H}
