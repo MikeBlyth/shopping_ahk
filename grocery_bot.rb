@@ -52,9 +52,12 @@ class WalmartGroceryAssistant
       puts "🛍️ Found #{grocery_items.length} items to order"
       puts '🚀 Starting shopping automation...'
 
-      process_grocery_list(grocery_items)
-
-      @ahk.show_message("Shopping complete!\n\nReview your cart and proceed to checkout when ready.")
+      result = process_grocery_list(grocery_items)
+      
+      # Only show completion message if user didn't quit
+      unless result == :quit
+        @ahk.show_message("Shopping complete!\n\nReview your cart and proceed to checkout when ready.")
+      end
     end
 
     # Shopping list processing complete - signal session complete to show persistent tooltip
@@ -429,7 +432,7 @@ class WalmartGroceryAssistant
         puts '   💬 Showing user interaction dialog...'
         sleep(1)
         result = handle_user_interaction(item_name, db_item)
-        return if result == :quit  # Exit shopping list processing
+        return :quit if result == :quit  # Exit shopping list processing and return quit signal
         
         # Handle "Search Again" request - treat like multi-choice "search for new item"
         if result == :search_new_item

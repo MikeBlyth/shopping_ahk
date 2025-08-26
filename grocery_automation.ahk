@@ -83,6 +83,12 @@ if !TargetWindowHandle {
     ExitApp
 }
 
+; Immediately activate the captured window to ensure it's the browser
+WinActivate(TargetWindowHandle)
+WinWaitActive(TargetWindowHandle, , 3)  ; 3 second timeout
+; Show confirmation of which window we're using
+MsgBox("Using window: " . WinGetTitle(TargetWindowHandle), "Confirmation", "T2")  ; 2 second auto-dismiss
+
 ; Update status for shopping mode
 ShowPersistentStatus("Processing shopping list")
 
