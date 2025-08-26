@@ -181,10 +181,7 @@ OpenURL(url) {
     WinWaitActive(TargetWindowHandle)
     PasteURL(url)
     
-    ; Wait briefly for page to start loading
-    Sleep(800)
-    
-    ; Don't wait for user here - let the next command (SHOW_ITEM_PROMPT) handle user interaction
+    ; Return immediately - don't wait for page loading
     WriteStatus("COMPLETED")
 }
 
@@ -328,13 +325,12 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     global CurrentPriceEdit := priceEdit
     FileAppend("ShowPurchaseDialog: Set CurrentPriceEdit reference`n", "command_debug.txt")
     
-    ; Show dialog
+    ; Show dialog immediately
     purchaseGui.Show()
     WriteStatus("WAITING_FOR_INPUT")
     
-    ; Start purchase detection
-    FileAppend("Calling StartPurchaseDetection from ShowPurchaseDialog`n", "command_debug.txt")
-    StartPurchaseDetection()
+    ; Start purchase detection after dialog is shown
+    SetTimer(() => StartPurchaseDetection(), -100)  ; Run once after 100ms delay
 }
 
 ; Event handler functions for Purchase dialog
@@ -760,13 +756,12 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     global CurrentPriceEdit := priceEdit
     FileAppend("ShowAddItemDialog: Set CurrentPriceEdit reference`n", "command_debug.txt")
     
-    ; Show dialog
+    ; Show dialog immediately
     addItemGui.Show()
     WriteStatus("WAITING_FOR_INPUT")
     
-    ; Start purchase detection
-    FileAppend("Calling StartPurchaseDetection from ShowAddItemDialogWithDefaults`n", "command_debug.txt")
-    StartPurchaseDetection()
+    ; Start purchase detection after dialog is shown
+    SetTimer(() => StartPurchaseDetection(), -100)  ; Run once after 100ms delay
 }
 
 ; Event handler functions for Add Item dialog

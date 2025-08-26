@@ -454,7 +454,7 @@ class WalmartGroceryAssistant
 
   def navigate_to_known_item(item)
     @ahk.open_url(item[:url])
-    sleep(2)
+    # No sleep - let dialog show immediately while page loads
   end
 
   def search_for_new_item(item_name)
