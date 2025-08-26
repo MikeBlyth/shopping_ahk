@@ -68,6 +68,9 @@ try {
 ; Load price character library for OCR price detection
 LoadPriceCharacters()
 
+; Load subscribe pattern for auto-detection
+LoadSubscribePattern()
+
 ; Show initial status
 ShowPersistentStatus("Assistant ready - select browser window and click OK to start")
 
@@ -162,17 +165,12 @@ ProcessCommand(command) {
             ShowAddItemDialog(param)
         case "TERMINATE":
             FileAppend("MATCHED TERMINATE - shutting down`n", "command_debug.txt")
-            global StatusGui
             
-            ; Close status window
-            if StatusGui != "" {
-                try {
-                    StatusGui.Destroy()
-                }
-            }
+            ; Silently close all dialogs
+            CloseAllDialogs()
             
             WriteStatus("SHUTDOWN")
-            MsgBox("Ruby requested AutoHotkey shutdown", "Walmart Assistant", "OK")
+            ; Silent shutdown - no MsgBox
             ExitApp()
         default:
             FileAppend("UNKNOWN COMMAND - action: '" . action . "', original: '" . command . "'`n", "command_debug.txt")
@@ -310,6 +308,14 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     purchaseGui.Add("Text", "xm y+10", "Quantity:")
     quantityEdit := purchaseGui.Add("Edit", "w150 r1", default_quantity)
     
+    ; Subscribable checkbox (auto-detect and set)
+    purchaseGui.Add("Text", "xm y+10", "Subscribable (auto-detected):")
+    subscribableCheckbox := purchaseGui.Add("Checkbox", "xm y+5 w200 h20", "Subscripable")
+    
+    ; Auto-detect subscribable status and set checkbox
+    isSubscribable := DetectSubscribable()
+    subscribableCheckbox.Value := isSubscribable ? 1 : 0
+    
     ; Buttons - Override button starts as warning state
     addButton := purchaseGui.Add("Button", "xm y+20 w120 h30 BackgroundRed cWhite", "⚠️ Override")
     skipButton := purchaseGui.Add("Button", "x+10 w100 h30", "Skip Item")
@@ -318,6 +324,7 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     ; Store references for event handlers
     purchaseGui.priceEdit := priceEdit
     purchaseGui.quantityEdit := quantityEdit
+    purchaseGui.subscribableCheckbox := subscribableCheckbox
     purchaseGui.is_known := is_known
     purchaseGui.item_description := item_description
     
@@ -343,6 +350,7 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
 PurchaseClickHandler(gui) {
     price := Trim(gui.priceEdit.Text)
     quantity := Trim(gui.quantityEdit.Text)
+    subscribable := gui.subscribableCheckbox.Value
     
     ; Validate quantity
     if quantity = "" || !IsNumber(quantity) || Integer(quantity) < 1 {
@@ -378,11 +386,13 @@ PurchaseClickHandler(gui) {
             response_obj["type"] := "purchase_new"
             response_obj["price"] := Float(price)
             response_obj["quantity"] := Integer(quantity)
+            response_obj["subscribable"] := subscribable ? true : false
             response_obj["url"] := current_url
         } else {
             response_obj["type"] := "purchase"
             response_obj["price"] := Float(price)
             response_obj["quantity"] := Integer(quantity)
+            response_obj["subscribable"] := subscribable ? true : false
         }
         WriteResponseJSON(response_obj)
     }
@@ -722,9 +732,13 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     addItemGui.Add("Text", "xm y+10", "Default Quantity:")
     defaultQuantityEdit := addItemGui.Add("Edit", "w100 r1", "1")
     
-    ; Subscribable checkbox
-    addItemGui.Add("Text", "xm y+10", "Subscribable:")
-    subscribableCheckbox := addItemGui.Add("Checkbox", "w20 h20", "")
+    ; Subscribable checkbox (auto-detect and set)
+    addItemGui.Add("Text", "xm y+10", "Subscribable (auto-detected):")
+    subscribableCheckbox := addItemGui.Add("Checkbox", "xm y+5 w200 h20", "Enable subscription")
+    
+    ; Auto-detect subscribable status and set checkbox
+    isSubscribable := DetectSubscribable()
+    subscribableCheckbox.Value := isSubscribable ? 1 : 0
     
     ; Separator
     addItemGui.Add("Text", "xm y+15 w400", "────────────── Purchase Info ──────────────")
@@ -912,6 +926,7 @@ CancelItemClickHandler(gui) {
     WriteResponse("cancelled")
     WriteStatus("COMPLETED")
     StopPriceDetection()
+    ; Silent close - no messages
     gui.Destroy()
 }
 
@@ -956,20 +971,53 @@ ShowPersistentStatus(message, isUrgent := false) {
     WinSetAlwaysOnTop(1, StatusGui.Hwnd)
 }
 
-; Shared quit functionality
-PerformQuit() {
+; Function to silently close all dialogs
+CloseAllDialogs() {
     global StatusGui
+    
+    ; Close all open GUIs by enumerating them
+    try {
+        ; Get all top-level windows belonging to this process
+        WinGetList("", , , "ahk_pid " . ProcessExist())
+        Loop {
+            try {
+                ; Try to find and close any remaining GUI windows
+                if WinExist("Add Item & Purchase ahk_pid " . ProcessExist()) {
+                    WinClose("Add Item & Purchase ahk_pid " . ProcessExist())
+                }
+                if WinExist("Purchase Item ahk_pid " . ProcessExist()) {
+                    WinClose("Purchase Item ahk_pid " . ProcessExist())
+                }
+                if WinExist("Select Item ahk_pid " . ProcessExist()) {
+                    WinClose("Select Item ahk_pid " . ProcessExist())
+                }
+                break
+            } catch {
+                break
+            }
+        }
+    } catch {
+        ; Ignore errors during cleanup
+    }
     
     ; Close status window
     if StatusGui != "" {
         try {
             StatusGui.Destroy()
+        } catch {
+            ; Ignore errors
         }
     }
+}
+
+; Shared quit functionality
+PerformQuit() {
+    ; Silently close all dialogs
+    CloseAllDialogs()
     
     WriteResponse("quit")  ; Tell Ruby we're quitting
     WriteStatus("SHUTDOWN")
-    MsgBox("AutoHotkey script shutting down...", "Walmart Assistant", "OK")
+    ; Remove MsgBox - silent shutdown
     ExitApp()
 }
 
@@ -1137,5 +1185,55 @@ CheckForPrice() {
         
         ; Stop detection since we found a price
         StopPriceDetection()
+    }
+}
+
+; Subscribe pattern detection functions
+LoadSubscribePattern() {
+    ; Load the subscribe pattern for FindText detection
+    global SubscribePattern
+    SubscribePattern := "|<subscribe>*163$135.00s0000000000000000000003U000000000000000000000A0000000000000000000001k0000000000M00000000006000000TU00300000001k00k00000Dz000M0000000C007000003UM00300000000000M00000M0000M0000000000300000300003303U0E00000M00000M030MNy1zUzlbC00300000300M33MsQAD6Btk00M00000S030MQ3X03U1sC003000001zUM33UAs0M0C1k00M000003z30MM1n0301kC0030000000sM330CTUs0A1k00s0000003X0MM1kz701UC0060000000AM330C0wM0A1k00k0000001X0MM1U1X01UC00C0000000AM73UA0CQ0A1k01U00000M33UsS3U1Vk1UC00Q000003zsDv3Tsyw7yA1k07000000Dy0yMNy1z0TlUC00s000000000000000000000C0000000000000000000003U00000000000000000004"
+    FileAppend("Subscribe pattern loaded for auto-detection`n", "command_debug.txt")
+}
+
+DetectSubscribable() {
+    ; Auto-detect if item is subscribable by looking for subscribe pattern on page
+    global SubscribePattern, TargetWindowHandle
+    
+    FileAppend("DetectSubscribable: Starting subscribe pattern detection`n", "command_debug.txt")
+    
+    ; Ensure browser window is active for consistent detection
+    try {
+        if (TargetWindowHandle) {
+            WinActivate(TargetWindowHandle)
+            WinWaitActive(TargetWindowHandle, , 2)
+        }
+    } catch Error as e {
+        FileAppend("DetectSubscribable: Could not activate window - " . e.Message . "`n", "command_debug.txt")
+    }
+    
+    ; Search same area as price detection (right 25% of screen, vertically 25-75%)
+    screenWidth := A_ScreenWidth  
+    screenHeight := A_ScreenHeight
+    
+    ; Define search area: right 25%, vertically 25-75% (same as price detection)
+    x1 := Floor(screenWidth * 0.75)
+    x2 := screenWidth
+    y1 := Floor(screenHeight * 0.25)
+    y2 := Floor(screenHeight * 0.75)
+    
+    FileAppend("DetectSubscribable: Searching region " . x1 . "," . y1 . " to " . x2 . "," . y2 . " (same as price detection)`n", "command_debug.txt")
+    
+    ; Use FindText to detect subscribe pattern with moderate tolerance
+    X := ""
+    Y := ""
+    result := FindText(&X, &Y, x1, y1, x2, y2, 0, 0, SubscribePattern)
+    
+    if (result) {
+        FileAppend("DetectSubscribable: FOUND subscribe pattern - item is subscribable`n", "command_debug.txt")
+        return true
+    } else {
+        FileAppend("DetectSubscribable: Subscribe pattern NOT found - item is not subscribable`n", "command_debug.txt") 
+        return false
     }
 }

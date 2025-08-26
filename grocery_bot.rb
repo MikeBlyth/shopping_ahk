@@ -509,6 +509,7 @@ class WalmartGroceryAssistant
       modifier = parsed_response[:modifier]
       priority = parsed_response[:priority] || 1
       default_quantity = parsed_response[:default_quantity] || 1
+      subscribable = parsed_response[:subscribable] || false
       url = parsed_response[:url]
       price = parsed_response[:price]
       purchase_quantity = parsed_response[:purchase_quantity] || 1
@@ -531,6 +532,7 @@ class WalmartGroceryAssistant
               updates[:default_quantity] =
                 default_quantity
             end
+            updates[:subscribable] = subscribable if subscribable != existing_item[:subscribable]
 
             if updates.any?
               @db.update_item(prod_id, updates)
@@ -547,7 +549,8 @@ class WalmartGroceryAssistant
               description: description,
               modifier: modifier.empty? ? nil : modifier,
               default_quantity: default_quantity,
-              priority: priority
+              priority: priority,
+              subscribable: subscribable
             )
             db_item = @db.find_item_by_prod_id(prod_id)
           end
@@ -1099,6 +1102,16 @@ class WalmartGroceryAssistant
 
       # Still record in database
       if db_item && db_item[:prod_id]
+        # Update subscribable field if provided and different
+        if parsed_response[:subscribable] != nil
+          # Convert AHK integer (1/0) to proper boolean
+          subscribable_bool = parsed_response[:subscribable] == 1 || parsed_response[:subscribable] == true
+          if subscribable_bool != db_item[:subscribable]
+            @db.update_item(db_item[:prod_id], { subscribable: subscribable_bool })
+            puts "📦 Updated subscribable status: #{db_item[:description]} → #{subscribable_bool ? 'Yes' : 'No'}"
+          end
+        end
+        
         price_cents = (parsed_response[:price] * 100).to_i
         @db.record_purchase(
           prod_id: db_item[:prod_id],
@@ -1119,13 +1132,15 @@ class WalmartGroceryAssistant
 
         if prod_id
           # Create the new item without recording a purchase
+          subscribable = parsed_response[:subscribable] || false
           @db.create_item(
             prod_id: prod_id,
             url: captured_url,
             description: original_shopping_item_name,
             modifier: nil,
             default_quantity: 1,
-            priority: 5
+            priority: 5,
+            subscribable: subscribable
           )
 
           puts "✅ Saved new item URL: #{original_shopping_item_name} (no purchase recorded)"
