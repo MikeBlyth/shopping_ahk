@@ -509,7 +509,9 @@ class WalmartGroceryAssistant
       modifier = parsed_response[:modifier]
       priority = parsed_response[:priority] || 1
       default_quantity = parsed_response[:default_quantity] || 1
-      subscribable = parsed_response[:subscribable] || false
+      # Convert AHK integer (1/0) to proper boolean
+      subscribable_raw = parsed_response[:subscribable] || false
+      subscribable = subscribable_raw == 1 || subscribable_raw == true
       url = parsed_response[:url]
       price = parsed_response[:price]
       purchase_quantity = parsed_response[:purchase_quantity] || 1
@@ -609,7 +611,8 @@ class WalmartGroceryAssistant
         modifier = parts[1].strip
         priority = parts[2].strip.to_i
         default_quantity = parts[3].strip.to_i
-        subscribable = parts[4].strip == '1'
+        # Convert string to proper boolean
+        subscribable = parts[4].strip == '1' || parts[4].strip.downcase == 'true'
         url = parts[5].strip
       else
         puts '❌ Unrecognized response format'
@@ -893,7 +896,9 @@ class WalmartGroceryAssistant
     modifier = parsed_response[:modifier]&.strip || ''
     priority = parsed_response[:priority] || 1
     default_quantity = parsed_response[:default_quantity] || 1
-    subscribable = parsed_response[:subscribable] || false
+    # Convert AHK integer (1/0) to proper boolean
+    subscribable_raw = parsed_response[:subscribable] || false
+    subscribable = subscribable_raw == 1 || subscribable_raw == true
     url = parsed_response[:url]&.strip || ''
     price = parsed_response[:price]
     purchase_quantity = parsed_response[:purchase_quantity] || 1
