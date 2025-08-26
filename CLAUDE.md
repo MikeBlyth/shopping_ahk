@@ -10,6 +10,7 @@
 - ✅ **Two-section sheet format**: Product list + Shopping list with proper handling
 - ✅ **Quit signal handling**: Ruby properly exits when user presses Ctrl+Shift+Q
 - ✅ **Purchase detection**: Detects "Add to Cart" clicks with visual feedback in dialogs
+- ✅ **Price detection**: Automatic OCR price detection after "Add to Cart" clicks
 - Git repository committed and ready (local commits ahead of remote)
 
 ## Key Technical Details
@@ -250,3 +251,26 @@ Purchase detection feature has been successfully implemented and is now fully op
 - **Integration**: Works seamlessly with both purchase dialogs and add item dialogs
 
 The system now prevents users from marking items as purchased in the app until they actually click the "Add to Cart" button on the website, ensuring synchronization between the automation and actual shopping cart actions.
+
+### Price Detection - COMPLETED ✅
+
+Automatic price detection feature has been successfully implemented and is now fully operational:
+
+- **OCR Integration**: Uses `lib/get_price_function.ahk` with pre-trained character patterns for Walmart's large price font
+- **Click-Triggered**: Price detection starts automatically when user clicks "Add to Cart" button on website
+- **Search Region**: Right 25% of screen (75-100% width, 25-75% height) for optimal price location
+- **4-Second Window**: Searches every 500ms for up to 4 seconds, then stops automatically
+- **Smart Stopping**: Stops immediately when price found, user types manually, or dialog closed
+- **Performance Logging**: Debug logs show exact OCR timing on successful detection (typically ~600ms per iteration)
+- **Error Protection**: Safely handles Add to Cart clicks when no dialog present, prevents crashes
+- **Automatic Fill**: Successfully detected prices are automatically filled into price field
+- **User Override**: Users can still enter prices manually - detection stops when typing begins
+
+**Technical Implementation:**
+- **Character Library**: `LoadPriceCharacters()` loads exact pixel patterns at startup
+- **Asynchronous**: Uses `SetTimer()` for non-blocking background detection  
+- **FindText OCR**: Searches for "$1234567890." characters with strict matching (0.05 tolerance)
+- **Pattern Validation**: Validates extracted text has proper price format (digits.digits)
+- **Reference Management**: Each dialog sets its own `CurrentPriceEdit` reference for multi-item support
+
+The system provides seamless price detection that works across all items in the shopping list, significantly reducing manual data entry while maintaining full user control.

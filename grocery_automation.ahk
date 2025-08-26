@@ -4,6 +4,7 @@
 ; Include JSON library and image search function
 #Include lib/jsongo.v2.ahk
 #Include lib/image_search_function.ahk
+#Include lib/get_price_function.ahk
 
 ; Use fast typing of URL 
 SendMode "Input"
@@ -39,6 +40,11 @@ StatusGui := ""
 ButtonRegion := {left: 0, top: 0, right: 0, bottom: 0}
 ButtonFound := false
 CurrentPurchaseButton := ""
+; Price detection variables
+PriceDetectionTimer := ""
+PriceDetectionActive := false
+CurrentPriceEdit := ""
+PriceDetectionStartTime := 0
 
 ; Initialize - clear any leftover files from previous session
 try {
@@ -58,6 +64,9 @@ try {
 } catch {
     ; Ignore errors if file doesn't exist
 }
+
+; Load price character library for OCR price detection
+LoadPriceCharacters()
 
 ; Show initial status
 ShowPersistentStatus("Assistant ready - select browser window and click OK to start")
@@ -314,8 +323,10 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     skipButton.OnEvent("Click", (*) => SkipClickHandler(purchaseGui))
     searchButton.OnEvent("Click", (*) => SearchAgainClickHandler(purchaseGui))
     
-    ; Store purchase button reference globally for click detection
+    ; Store purchase button and price edit references globally for click detection
     global CurrentPurchaseButton := addButton
+    global CurrentPriceEdit := priceEdit
+    FileAppend("ShowPurchaseDialog: Set CurrentPriceEdit reference`n", "command_debug.txt")
     
     ; Show dialog
     purchaseGui.Show()
@@ -375,6 +386,7 @@ PurchaseClickHandler(gui) {
     }
     
     WriteStatus("COMPLETED")
+    StopPriceDetection()
     gui.Destroy()
 }
 
@@ -391,6 +403,7 @@ SkipClickHandler(gui) {
     WriteResponseJSON(response_obj)
     
     WriteStatus("COMPLETED")
+    StopPriceDetection()
     gui.Destroy()
 }
 
@@ -401,6 +414,7 @@ SearchAgainClickHandler(gui) {
     response_obj["choice_index"] := 999  ; Use high number to indicate "search for new item" option
     WriteResponseJSON(response_obj)
     WriteStatus("COMPLETED")
+    StopPriceDetection()
     gui.Destroy()
 }
 
@@ -741,8 +755,10 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     addOnlyButton.OnEvent("Click", (*) => AddOnlyClickHandler(addItemGui))
     cancelButton.OnEvent("Click", (*) => CancelItemClickHandler(addItemGui))
     
-    ; Store purchase button reference globally for click detection
+    ; Store purchase button and price edit references globally for click detection
     global CurrentPurchaseButton := addButton
+    global CurrentPriceEdit := priceEdit
+    FileAppend("ShowAddItemDialog: Set CurrentPriceEdit reference`n", "command_debug.txt")
     
     ; Show dialog
     addItemGui.Show()
@@ -824,6 +840,7 @@ AddAndPurchaseClickHandler(gui) {
     FileAppend("AddAndPurchaseClickHandler - writing JSON response`n", "command_debug.txt")
     WriteResponseJSON(response_obj)
     WriteStatus("COMPLETED")
+    StopPriceDetection()
     gui.Destroy()
     
     ; Show confirmation
@@ -874,6 +891,7 @@ AddOnlyClickHandler(gui) {
     FileAppend("AddOnlyClickHandler - writing response: " . response . "`n", "command_debug.txt")
     WriteResponse(response)
     WriteStatus("COMPLETED")
+    StopPriceDetection()
     gui.Destroy()
     
     ; Show confirmation
@@ -883,6 +901,7 @@ AddOnlyClickHandler(gui) {
 CancelItemClickHandler(gui) {
     WriteResponse("cancelled")
     WriteStatus("COMPLETED")
+    StopPriceDetection()
     gui.Destroy()
 }
 
@@ -1001,13 +1020,112 @@ StartPurchaseDetection() {
                      mouseY >= ButtonRegion.top && mouseY <= ButtonRegion.bottom)
         
         if (inRegion) {
-            FileAppend("HIT - Changing button`n", "command_debug.txt")
+            FileAppend("HIT - Changing button and starting price detection`n", "command_debug.txt")
             
-            ; Simply change button state - that's it!
+            ; Change button state
             CurrentPurchaseButton.Text := "✅ Add & Purchase"
             CurrentPurchaseButton.Opt("BackgroundGreen cWhite")
+            
+            ; Start price detection now that user clicked Add to Cart
+            ; Only start if we have a valid dialog with price field open
+            if (CurrentPriceEdit && IsObject(CurrentPriceEdit)) {
+                try {
+                    ; Test if the price edit control is still valid
+                    testText := CurrentPriceEdit.Text
+                    StartPriceDetection(CurrentPriceEdit)
+                    FileAppend("Price detection started - dialog is present`n", "command_debug.txt")
+                } catch {
+                    FileAppend("Skipping price detection - dialog not present or invalid`n", "command_debug.txt")
+                }
+            } else {
+                FileAppend("Skipping price detection - no dialog present`n", "command_debug.txt")
+            }
         } else {
             FileAppend("MISS`n", "command_debug.txt")
         }
+    }
+}
+
+; Price Detection Functions
+StartPriceDetection(priceEditControl) {
+    global PriceDetectionTimer, PriceDetectionActive, CurrentPriceEdit, PriceDetectionStartTime
+    
+    FileAppend("StartPriceDetection called`n", "command_debug.txt")
+    
+    ; Stop any existing price detection
+    StopPriceDetection()
+    
+    ; Set up new price detection
+    CurrentPriceEdit := priceEditControl
+    PriceDetectionActive := true
+    PriceDetectionStartTime := A_TickCount  ; Record start time in milliseconds
+    
+    ; Start timer to check for prices every 500ms
+    PriceDetectionTimer := SetTimer(() => CheckForPrice(), 500)
+    
+    FileAppend("Price detection timer started - will stop after 4 seconds`n", "command_debug.txt")
+}
+
+StopPriceDetection() {
+    global PriceDetectionTimer, PriceDetectionActive
+    
+    if (PriceDetectionTimer) {
+        SetTimer(PriceDetectionTimer, 0)  ; Stop timer
+        PriceDetectionTimer := ""
+        FileAppend("Price detection timer stopped`n", "command_debug.txt")
+    }
+    
+    PriceDetectionActive := false
+    ; Note: Don't clear CurrentPriceEdit here - let new dialogs set it when they open
+}
+
+CheckForPrice() {
+    global CurrentPriceEdit, PriceDetectionActive, PriceDetectionStartTime
+    
+    ; Stop if detection is no longer active or dialog closed
+    if (!PriceDetectionActive || !CurrentPriceEdit) {
+        StopPriceDetection()
+        return
+    }
+    
+    ; Check if 4 seconds have elapsed (4000 milliseconds)
+    elapsedTime := A_TickCount - PriceDetectionStartTime
+    if (elapsedTime > 4000) {
+        FileAppend("Price detection timeout after 4 seconds - stopping detection`n", "command_debug.txt")
+        StopPriceDetection()
+        return
+    }
+    
+    ; Check if user has manually entered a price - if so, stop detection
+    currentText := Trim(CurrentPriceEdit.Text)
+    if (currentText != "") {
+        FileAppend("User entered price manually: '" . currentText . "' - stopping detection`n", "command_debug.txt")
+        StopPriceDetection()
+        return
+    }
+    
+    ; Search for price on screen using same region as test script (right 25% of screen)
+    screenWidth := A_ScreenWidth
+    screenHeight := A_ScreenHeight
+    
+    ; Define search area: right 25%, vertically 25-75%
+    x1 := Floor(screenWidth * 0.75)
+    x2 := screenWidth
+    y1 := Floor(screenHeight * 0.25)
+    y2 := Floor(screenHeight * 0.75)
+    
+    ; Try to extract price - measure this specific OCR call
+    ocrStartTime := A_TickCount
+    price := get_price(x1, y1, x2, y2)
+    ocrDuration := A_TickCount - ocrStartTime
+    
+    if (price && price != "") {
+        FileAppend("SUCCESS: Price detected '" . price . "' - OCR took " . ocrDuration . "ms on this iteration - filling in field`n", "command_debug.txt")
+        
+        ; Fill in the price field
+        CurrentPriceEdit.Text := price
+        
+        ; Stop detection since we found a price
+        StopPriceDetection()
     }
 }
