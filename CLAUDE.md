@@ -275,3 +275,21 @@ Automatic price detection feature has been successfully implemented and is now f
 - **Reference Management**: Each dialog sets its own `CurrentPriceEdit` reference for multi-item support
 
 The system provides seamless price detection that works across all items in the shopping list, significantly reducing manual data entry while maintaining full user control.
+
+### Unified JSON Communication System - COMPLETED ✅
+
+The Ruby-AHK communication architecture has been simplified and unified to use a single JSON-based channel:
+
+- **Single Channel**: Eliminated dual communication system (status file + response file), now uses only response file with JSON
+- **Startup Simplification**: Ruby waits for single READY JSON response instead of dual-wait system
+- **Process Management**: Removed AutoHotkey process killing, uses only file-based cleanup
+- **Response Standardization**: All AHK responses now use consistent JSON format with helper functions
+- **Helper Functions**: Added SendStatus(), SendChoice(), SendURL(), SendError() for consistent response formatting
+- **Backward Compatibility**: Deprecated check_status() method in Ruby bridge, maintained for compatibility
+- **Communication Flow**: Ruby sends pipe-delimited commands, AHK responds with JSON objects containing type and value fields
+
+**Technical Benefits:**
+- **Simplified Architecture**: Single communication channel reduces complexity and race conditions
+- **Consistent Parsing**: All responses parsed as JSON, eliminating mixed format handling
+- **Better Error Handling**: Unified error responses through JSON structure
+- **Maintainable Code**: Helper functions reduce duplication and ensure consistent formatting

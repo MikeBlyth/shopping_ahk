@@ -22,7 +22,7 @@ class AhkBridge
       # Send as legacy pipe-delimited command
       write_command(command)
     end
-    wait_for_completion(timeout)
+    # No longer wait for completion - let callers use read_response() when needed
   end
 
   def open_url(url)
@@ -56,6 +56,21 @@ class AhkBridge
       response
     rescue StandardError => e
       puts "🎭 SHOW_ITEM_PROMPT failed: #{e.message}".colorize(:red)
+      ''
+    end
+  end
+
+  def navigate_and_show_dialog(url, item_name, is_known: false, description: '', item_description: '', default_quantity: 1)
+    params = "#{url}|#{item_name}|#{is_known}|#{description}|#{item_description}|#{default_quantity}"
+    puts "🌐🎭 About to send NAVIGATE_AND_SHOW_DIALOG command for #{item_name}...".colorize(:blue)
+
+    begin
+      send_command("NAVIGATE_AND_SHOW_DIALOG|#{params}")
+      response = read_response
+      puts "🌐🎭 NAVIGATE_AND_SHOW_DIALOG response: '#{response}'".colorize(:blue)
+      response
+    rescue StandardError => e
+      puts "🌐🎭 NAVIGATE_AND_SHOW_DIALOG failed: #{e.message}".colorize(:red)
       ''
     end
   end
@@ -203,6 +218,11 @@ class AhkBridge
   end
 
   def write_command(command)
+    # Wait for any existing command to be processed first
+    while File.exist?(COMMAND_FILE)
+      sleep(0.1)
+    end
+    
     File.write(COMMAND_FILE, command)
     puts "  → AHK Command: #{command.split('|').first}".colorize(:light_black)
   end
@@ -228,31 +248,25 @@ class AhkBridge
 
   def wait_loop
     loop do
-        status = check_status
+        next unless File.exist?(RESPONSE_FILE)
+        response = read_response
+        next if response.nil? || response.empty?
 
-        if status != 'UNKNOWN' # Avoid spamming the log
-            puts "  ⏳ wait_loop received status: '#{status}'"
-        end
-        
-        case status
-        when 'READY'
-          puts "  ✅ wait_loop returning on READY"
-          return true
-        when 'COMPLETED'
-          # Wait a moment to ensure AHK has finished writing response
-          puts "  ✅ wait_loop returning on COMPLETED"
-          sleep(0.1)
-          return true
-        when 'ERROR'
-          response = read_response
-          raise "AHK Error: #{response}"
-        when 'SHUTDOWN'
-          puts "  🛑 wait_loop returning on SHUTDOWN"
-          return true
-        when 'WAITING_FOR_USER'
-          puts '🛑 AHK is waiting for user action...'.colorize(:yellow)
-          # This status no longer occurs since we removed wait_for_user functionality
-          # The loop will continue and check status again
+        # Only process status responses, ignore other types
+        if response[:type] == 'status'
+          status_value = response[:value]
+          puts "  ⏳ wait_loop received status: '#{status_value}'"
+          
+          case status_value.downcase
+          when 'ready'
+            puts "  ✅ wait_loop returning on READY"
+            return true
+          when 'error'
+            raise "AHK Error: #{response[:error] || 'Unknown error'}"
+          when 'shutdown'
+            puts "  🛑 wait_loop returning on SHUTDOWN"
+            return true
+          end
         end
 
         sleep(0.5)

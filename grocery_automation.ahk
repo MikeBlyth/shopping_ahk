@@ -156,6 +156,9 @@ ProcessCommand(command) {
         case "SHOW_ITEM_PROMPT":
             FileAppend("MATCHED SHOW_ITEM_PROMPT`n", "command_debug.txt")
             ShowItemPrompt(param)
+        case "NAVIGATE_AND_SHOW_DIALOG":
+            FileAppend("MATCHED NAVIGATE_AND_SHOW_DIALOG`n", "command_debug.txt")
+            NavigateAndShowDialog(param)
         case "SHOW_MULTIPLE_CHOICE":
             FileAppend("MATCHED SHOW_MULTIPLE_CHOICE`n", "command_debug.txt")
             ShowMultipleChoice(param)
@@ -193,7 +196,7 @@ OpenURL(url) {
     PasteURL(url)
     
     ; Return immediately - don't wait for page loading
-    SendStatus("completed")
+    SendStatus("ready")
 }
 
 PasteURL(url) {
@@ -228,7 +231,7 @@ SearchWalmart(searchTerm) {
     Sleep(2000)
     
     ; Don't wait for user here - let the next command (SHOW_ITEM_PROMPT) handle user interaction
-    SendStatus("completed")
+    ; No response needed - this is fire-and-forget
 }
 
 GetCurrentURL() {
@@ -284,6 +287,28 @@ ShowItemPrompt(param) {
     default_quantity := parts.Length >= 6 ? parts[6] : "1"
     
     ; Show the purchase dialog
+    ShowPurchaseDialog(item_name, is_known, item_description, default_quantity)
+}
+
+NavigateAndShowDialog(param) {
+    ; Parse param: "url|item_name|is_known_item|description|item_description|default_quantity"
+    parts := StrSplit(param, "|")
+    url := parts[1]
+    item_name := parts[2]
+    is_known := parts[3] = "true"
+    description := parts.Length >= 4 ? parts[4] : ""
+    item_description := parts.Length >= 5 ? parts[5] : item_name
+    default_quantity := parts.Length >= 6 ? parts[6] : "1"
+    
+    FileAppend("NavigateAndShowDialog: Navigating to " . url . "`n", "command_debug.txt")
+    
+    ; Navigate to URL (background loading)
+    WinActivate(TargetWindowHandle)
+    WinWaitActive(TargetWindowHandle)
+    PasteURL(url)
+    
+    ; Show dialog immediately while page loads
+    FileAppend("NavigateAndShowDialog: Showing dialog for " . item_name . "`n", "command_debug.txt")
     ShowPurchaseDialog(item_name, is_known, item_description, default_quantity)
 }
 
@@ -622,6 +647,7 @@ ProcessSessionComplete() {
     FileAppend("ProcessSessionComplete called - setting completion tooltip`n", "command_debug.txt")
     ShowPersistentStatus("Shopping list complete! Press Ctrl+Shift+A to add items or Ctrl+Shift+Q to quit")
     ResetForNextSession()
+    SendStatus("ready")
 }
 
 
@@ -642,13 +668,13 @@ ShowAddItemDialogHotkey() {
     currentUrl := GetCurrentURLSilent()
     WriteDebug("Current URL captured: " . currentUrl)
     
-    ; Send lookup request to Ruby (non-blocking)
-    WriteDebug("Sending lookup request for URL: " . currentUrl)
-    SendLookupRequest(currentUrl)
-    
-    ; Show dialog immediately with "looking up" placeholder
+    ; Show dialog FIRST with "looking up" placeholder
     WriteDebug("Showing dialog with lookup placeholder")
     ShowAddItemDialogWithDefaults("< Looking up... >", currentUrl)
+    
+    ; THEN send lookup request to Ruby (after dialog is created)
+    WriteDebug("Sending lookup request for URL: " . currentUrl)
+    SendLookupRequest(currentUrl)
 }
 
 ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
@@ -656,8 +682,9 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     addItemGui := Gui("+AlwaysOnTop", "Add Item & Purchase")
     addItemGui.SetFont("s10")
     
-    ; Store reference to dialog globally
-    CurrentAddItemDialog := addItemGui
+    ; Store reference to dialog globally IMMEDIATELY
+    global CurrentAddItemDialog := addItemGui
+    global CurrentDialogControls := ""  ; Initialize to prevent race condition
     
     ; Description field
     addItemGui.Add("Text", , "Item Description (leave blank for purchase-only):")
@@ -714,8 +741,8 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     addItemGui.purchaseQuantityEdit := purchaseQuantityEdit
     addItemGui.currentUrl := currentUrl
     
-    ; Store control references globally for lookup updates
-    CurrentDialogControls := {
+    ; Store control references globally for lookup updates IMMEDIATELY
+    global CurrentDialogControls := {
         descriptionEdit: descriptionEdit,
         modifierEdit: modifierEdit,
         priorityEdit: priorityEdit,
@@ -1055,7 +1082,6 @@ StartPurchaseDetection() {
                 FileAppend("Skipping price detection - no dialog present`n", "command_debug.txt")
             }
         } else {
-            FileAppend("MISS`n", "command_debug.txt")
         }
     }
 }
@@ -1229,7 +1255,8 @@ ProcessLookupResult(jsonParam) {
     
     ; Only process if we have an active dialog
     if (!CurrentAddItemDialog || !CurrentDialogControls) {
-        WriteDebug("No active dialog to update")
+        WriteDebug("No active dialog to update - lookup result ignored")
+        SendStatus("ready")  ; Send acknowledgment anyway
         return
     }
     
@@ -1239,6 +1266,8 @@ ProcessLookupResult(jsonParam) {
         
         if (lookupData.found) {
             WriteDebug("Updating dialog with found item data")
+            WriteDebug("Current description field text: '" . CurrentDialogControls.descriptionEdit.Text . "'")
+            WriteDebug("Setting description to: '" . lookupData.description . "'")
             
             ; Update dialog fields with lookup data
             CurrentDialogControls.descriptionEdit.Text := lookupData.description
@@ -1248,6 +1277,7 @@ ProcessLookupResult(jsonParam) {
             CurrentDialogControls.subscribableCheckbox.Value := lookupData.subscribable ? 1 : 0
             CurrentDialogControls.quantityEdit.Text := lookupData.default_quantity
             
+            WriteDebug("After update, description field text: '" . CurrentDialogControls.descriptionEdit.Text . "'")
             WriteDebug("Dialog updated with: " . lookupData.description)
         } else {
             WriteDebug("Item not found - clearing placeholder text")
@@ -1261,4 +1291,6 @@ ProcessLookupResult(jsonParam) {
             CurrentDialogControls.descriptionEdit.Text := ""
         }
     }
+    
+    SendStatus("ready")
 }

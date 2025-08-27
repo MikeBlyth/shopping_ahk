@@ -171,10 +171,10 @@ class WalmartGroceryAssistant
       sleep(1)
       # Check for response file
       next unless File.exist?(@ahk.class::RESPONSE_FILE)
-      
+
       response = @ahk.read_response
       next if response.nil? || response.empty?
-      
+
       if response[:type] == 'status' && response[:value] == 'ready'
         puts '✅ AutoHotkey is ready!'
         break
@@ -189,7 +189,6 @@ class WalmartGroceryAssistant
     end
   end
 
-
   def start_ahk_script
     script_path = File.join(__dir__, 'grocery_automation.ahk')
 
@@ -201,7 +200,6 @@ class WalmartGroceryAssistant
     # Start the AutoHotkey script in the background
     system("start \"\" \"#{script_path}\"")
   end
-
 
   def sync_database_from_sheets
     return unless @sheets_sync
@@ -411,19 +409,13 @@ class WalmartGroceryAssistant
     items.each_with_index do |item_name, index|
       puts "📦 Processing item #{index + 1}/#{items.length}: #{item_name}"
 
-      # FAILSAFE: 4-second delay between items to prevent runaway behavior
-      puts '⏳ Failsafe delay (4 seconds)...'
-
       # Check if item exists in database
       db_item = find_item_in_database(item_name)
 
       if db_item && db_item != :search_new_item
         puts "   ✅ Found in database: #{db_item[:prod_id]} - #{db_item[:description]}"
-        navigate_to_known_item(db_item)
-
-        puts '   💬 Showing user interaction dialog...'
-        sleep(1)
-        result = handle_user_interaction(item_name, db_item)
+        puts '   🌐💬 Navigating and showing dialog...'
+        result = navigate_and_show_dialog_for_known_item(item_name, db_item)
         # NOTE: If user quits, handle_user_interaction will call exit(0) directly
 
         # Handle "Search Again" request - treat like multi-choice "search for new item"
@@ -466,7 +458,7 @@ class WalmartGroceryAssistant
 
       # Check for response file instead of status
       next unless File.exist?(@ahk.class::RESPONSE_FILE)
-      
+
       response = @ahk.read_response
       next if response.nil? || response.empty?
 
@@ -942,6 +934,25 @@ class WalmartGroceryAssistant
       puts "❌ Failed to create new item: #{e.message}"
       nil
     end
+  end
+
+  def navigate_and_show_dialog_for_known_item(item_name, db_item)
+    # Use combined command that navigates and shows dialog in one step
+    display_name = db_item[:description]
+    url = db_item[:url]
+    description = "Priority: #{db_item[:priority]}, Default Qty: #{db_item[:default_quantity]}"
+
+    response = @ahk.navigate_and_show_dialog(
+      url,
+      display_name,
+      is_known: true,
+      description: description,
+      item_description: display_name,
+      default_quantity: db_item[:default_quantity] || 1
+    )
+
+    # For now, just return the response - the caller will handle it the same way
+    parse_response(response)
   end
 
   def handle_user_interaction(item_name, db_item = nil)
