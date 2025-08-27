@@ -3,6 +3,7 @@ require 'csv'
 require 'json'
 require 'colorize'
 require 'dotenv/load'
+require 'logger'
 require_relative 'lib/google_sheets_integration'
 require 'debug' # Add the debugger
 require_relative 'lib/database'
@@ -13,6 +14,25 @@ class WalmartGroceryAssistant
     @ahk = AhkBridge.new
     @db = Database.instance
     @sheets_sync = GoogleSheetsIntegration.create_sync_client
+    @sync_completed = false  # Flag to prevent double sync
+
+    # Setup centralized logging
+    @logger = Logger.new(STDOUT)
+    @logger.level = Logger::DEBUG
+    @logger.formatter = proc do |severity, datetime, progname, msg|
+      case severity
+      when 'DEBUG'
+        "🔍 DEBUG: #{msg}\n"
+      when 'INFO' 
+        "ℹ️ #{msg}\n"
+      when 'WARN'
+        "⚠️ #{msg}\n".colorize(:yellow)
+      when 'ERROR'
+        "❌ #{msg}\n".colorize(:red)
+      else
+        "#{msg}\n"
+      end
+    end
 
     # Setup cleanup handlers for unexpected exits
     setup_cleanup_handlers
@@ -66,13 +86,20 @@ class WalmartGroceryAssistant
     # Signal AHK to show completion status and persistent tooltip (don't read response)
     @ahk.send_command('SESSION_COMPLETE')
 
-    # Wait for AHK to signal that user wants to end
-    puts '⏳ Waiting for user to exit (Ctrl+Shift+Q)...'
-    wait_for_ahk_shutdown
+    # Wait for user to add items manually or quit
+    puts '✅ Shopping list complete. Ready for manual actions (Ctrl+Shift+A) or quit (Ctrl+Shift+Q).'
+    @logger.debug('About to call post_list_actions')
+    post_list_actions
+    @logger.debug('Returned from post_list_actions')
 
     # Sync database items back to Google Sheets when user is done
-    puts '💾 Syncing database items to Google Sheets...'
-    sync_database_to_sheets
+    unless @sync_completed
+      puts '💾 Syncing database items to Google Sheets...'
+      sync_database_to_sheets
+      @sync_completed = true
+    else
+      puts '✅ Sheets already synced - skipping duplicate sync'
+    end
   rescue StandardError => e
     puts "\n❌ An error occurred: #{e.message}"
     puts "📍 Location: #{e.backtrace.first}"
@@ -103,19 +130,20 @@ class WalmartGroceryAssistant
     begin
       puts "\n🧹 Cleaning up and syncing to Google Sheets..."
 
-      # Perform final Google Sheets sync if we have shopping list data
-      if @shopping_list_data && !@shopping_list_data.empty? && @sheets_sync
+      # Perform final Google Sheets sync if we have shopping list data and haven't synced yet
+      if @shopping_list_data && !@shopping_list_data.empty? && @sheets_sync && !@sync_completed
         puts '📊 Performing sheet sync before exit...'
         begin
           puts "🔍 DEBUG: About to sync @shopping_list_data (#{@shopping_list_data.length} items)"
           puts "🔍 DEBUG: First few items: #{@shopping_list_data.first(2).inspect}"
           result = @sheets_sync.sync_from_database(@db, @shopping_list_data)
           puts "✅ Sync complete: #{result[:products]} products, #{result[:shopping_items]} shopping items"
+          @sync_completed = true
         rescue StandardError => e
           puts "❌ Final sheet sync failed: #{e.message}"
         end
       else
-        puts 'ℹ️ No shopping list data to sync'
+        puts 'ℹ️ Sheet sync skipped (no data or already completed)'
       end
 
       # Signal AHK to terminate gracefully
@@ -584,140 +612,20 @@ class WalmartGroceryAssistant
   end
 
   def handle_add_new_item(response_data)
-    puts "🔍 DEBUG: Processing add item response: #{response_data}"
+    @logger.debug("Processing add item response: #{response_data.inspect}")
 
+    # The response should already be a parsed hash from our new loop
     parsed_response = parse_response(response_data)
 
-    case parsed_response[:type]
-    when 'add_and_purchase'
-      puts '🔍 DEBUG: Using JSON add_and_purchase format'
+    # The main loop now only passes 'add_and_purchase' or unhandled legacy types here.
+    # We are simplifying to only handle the modern JSON format.
+    if parsed_response[:type]&.to_s == 'add_and_purchase'
+      @logger.debug('Calling handle_add_and_purchase_json')
       return handle_add_and_purchase_json(parsed_response)
-    when 'data', 'unknown'
-      # Try legacy pipe-delimited format
-      if response_data.is_a?(String) && response_data.include?('|')
-        parts = response_data.split('|')
-        puts "🔍 DEBUG: Split into #{parts.length} parts: #{parts.inspect}"
-
-        # Check if this is the legacy combined format
-        if parts[0] == 'add_and_purchase' && parts.length >= 8
-          puts '🔍 DEBUG: Using legacy add_and_purchase format'
-          return handle_add_and_purchase(parts[1..-1])
-        end
-
-        # Original format: description|modifier|priority|default_quantity|subscribable|url
-        return nil if parts.length < 6
-
-        description = parts[0].strip
-        modifier = parts[1].strip
-        priority = parts[2].strip.to_i
-        default_quantity = parts[3].strip.to_i
-        # Convert string to proper boolean
-        subscribable = parts[4].strip == '1' || parts[4].strip.downcase == 'true'
-        url = parts[5].strip
-      else
-        puts '❌ Unrecognized response format'
-        return nil
-      end
     else
-      puts "❌ Unrecognized response type: #{parsed_response[:type]}"
+      @logger.error("handle_add_new_item received an unexpected type: '#{parsed_response[:type]}'. This may indicate a legacy message from AHK.")
       return nil
     end
-
-    return nil if description.empty? || url.empty?
-
-    # Validate URL format
-    unless url.include?('walmart.com') && url.include?('/ip/')
-      puts "❌ Invalid URL: #{url}"
-      puts "   URL must be a Walmart product page (contain 'walmart.com' and '/ip/')"
-      return nil
-    end
-
-    # Normalize URL - remove query parameters and fragments
-    url = url.split('?').first.split('#').first
-
-    # Extract product ID from URL
-    puts "🔍 DEBUG: Extracting product ID from URL: #{url}"
-    prod_id = @db.extract_prod_id_from_url(url)
-    puts "🔍 DEBUG: Extracted product ID: #{prod_id}"
-    return nil unless prod_id
-
-    # Check if item already exists
-    existing_item = @db.find_item_by_prod_id(prod_id)
-    if existing_item
-      puts "🔄 Item already exists - updating: #{existing_item[:description]} → #{description}"
-      # Update existing item with new description/modifier (only if provided)
-      begin
-        updates = {}
-        updates[:description] = description unless description.strip.empty?
-        updates[:modifier] = modifier unless modifier.strip.empty?
-        updates[:priority] = priority if priority > 0 && priority != existing_item[:priority]
-        if default_quantity > 0 && default_quantity != existing_item[:default_quantity]
-          updates[:default_quantity] =
-            default_quantity
-        end
-        updates[:subscribable] = subscribable if subscribable != existing_item[:subscribable]
-
-        if updates.any?
-          @db.update_item(prod_id, updates)
-          puts "🔍 DEBUG: Database update successful for add_only - updated: #{updates.keys.join(', ')}"
-          puts '✅ Item updated without purchase'
-        else
-          puts '🔍 DEBUG: No updates needed - all fields same as existing'
-          puts '✅ Item processed without changes or purchase'
-        end
-      rescue StandardError => e
-        puts "❌ DEBUG: Database update failed: #{e.message}"
-        return nil
-      end
-
-      # Return updated item structure
-      return {
-        prod_id: prod_id,
-        url: url,
-        description: description,
-        modifier: modifier.empty? ? nil : modifier,
-        default_quantity: default_quantity,
-        priority: priority
-      }
-    end
-
-    # Create new item in database
-    begin
-      @db.create_item(
-        prod_id: prod_id,
-        url: url,
-        description: description,
-        modifier: modifier.empty? ? nil : modifier,
-        default_quantity: default_quantity,
-        priority: priority,
-        subscribable: subscribable
-      )
-      puts '🔍 DEBUG: Database insert successful for add_only'
-    rescue StandardError => e
-      puts "❌ DEBUG: Database insert failed: #{e.message}"
-      puts "   Backtrace: #{e.backtrace.first}"
-      return nil
-    end
-
-    puts "✅ Added new item: #{description}"
-    puts "   Modifier: #{modifier.empty? ? '(none)' : modifier}"
-    puts "   Priority: #{priority}"
-    puts "   Default Qty: #{default_quantity}"
-    puts "   Subscribable: #{subscribable ? 'Yes' : 'No'}"
-    puts "   Product ID: #{prod_id}"
-
-    # Update Google Sheets
-    @sheets_sync.update_item_url(description, url) if @sheets_sync
-
-    # Return the newly created item data
-    {
-      prod_id: prod_id,
-      url: url,
-      description: description,
-      modifier: modifier.empty? ? nil : modifier,
-      default_quantity: default_quantity,
-      priority: priority
-    }
   end
 
   def handle_add_and_purchase(parts)
@@ -1294,57 +1202,49 @@ class WalmartGroceryAssistant
     end
   end
 
-  def wait_for_ahk_shutdown
-    puts '🔍 DEBUG: Starting wait_for_ahk_shutdown loop...'
-
-    # Check for any existing response file and process it
-    if File.exist?(@ahk.class::RESPONSE_FILE)
-      puts '🔍 DEBUG: Found existing response file, processing...'
-      response = @ahk.read_response
-      puts "🔍 DEBUG: Read response: '#{response}'"
-
-      parsed_response = parse_response(response)
-
-      if parsed_response[:type] == 'status' && %w[quit shutdown].include?(parsed_response[:value])
-        puts '✅ User requested exit'
-        return # Exit the function, which will end wait_for_ahk_shutdown
-      elsif parsed_response[:type] == 'status' && parsed_response[:value] == 'session_reset'
-        puts '🔍 DEBUG: Session complete confirmation received'
-        puts '⏳ Waiting for user to exit (Ctrl+Shift+Q) or add items (Ctrl+Shift+A)...'
-      elsif response && !response.empty? &&
-            !(parsed_response[:type] == 'status' && parsed_response[:value] == 'cancelled') &&
-            parsed_response[:type] != 'status' # Don't process status responses as items
-        puts '📦 Processing existing item response...'
-        handle_add_new_item(response)
-      end
-    end
+  def post_list_actions
+    @logger.debug('Starting post-list action loop...')
+    @logger.debug("Monitoring response file: #{File.absolute_path(@ahk.class::RESPONSE_FILE)}")
 
     loop do
-      sleep(0.5) # Check twice per second
+      # Wait for a response file to appear, checking every 200ms
+      while !File.exist?(@ahk.class::RESPONSE_FILE)
+        sleep(0.2)
+      end
 
-      # Check if AHK wrote a response (happens for session_reset, add item, or quit)
-      next unless File.exist?(@ahk.class::RESPONSE_FILE)
-
-      puts '🔍 DEBUG: Found response file, reading...'
+      # File exists, read and delete it
       response = @ahk.read_response
-      puts "🔍 DEBUG: Read response: '#{response}'"
+      next if response.nil? || (response.is_a?(Hash) && response.empty?) || (response.is_a?(String) && response.empty?)
 
+      # Process the response
       parsed_response = parse_response(response)
+      @logger.debug("Processing response: #{parsed_response.inspect}")
 
-      if parsed_response[:type] == 'status' && %w[quit shutdown].include?(parsed_response[:value])
-        puts '✅ User requested exit'
-        break
-      elsif parsed_response[:type] == 'status' && parsed_response[:value] == 'session_reset'
-        puts '🔍 DEBUG: Session complete confirmation received'
-        puts '⏳ Waiting for user to exit (Ctrl+Shift+Q) or add items (Ctrl+Shift+A)...'
-        # Continue monitoring
-      elsif response && !response.empty? &&
-            !(parsed_response[:type] == 'status' && parsed_response[:value] == 'cancelled') &&
-            parsed_response[:type] != 'status' # Don't process status responses as items
-        puts '📦 Processing newly added item...'
+      # Use a case statement for clarity and to prevent fall-through errors
+      case parsed_response[:type]&.to_s
+      when 'status'
+        case parsed_response[:value]
+        when 'quit', 'shutdown'
+          puts '✅ User requested exit'
+          return # Exit the method
+        when 'continue'
+          @logger.info('End of shopping list message received. Waiting for user actions.')
+        end
+      when 'lookup_request'
+        @logger.info('Processing item lookup request...')
+        url = parsed_response[:url]
+        if url
+          @logger.debug("Lookup URL: #{url}")
+          @ahk.lookup_item_by_url(url, @db)
+        else
+          @logger.warn('Lookup request received without a URL.')
+        end
+      when 'add_and_purchase'
+        @logger.info("Processing 'add_and_purchase' request...")
         handle_add_new_item(response)
       else
-        puts '🔍 DEBUG: Response was empty, cancelled, or nil'
+        @logger.warn("Unrecognized response type '#{parsed_response[:type]}', attempting to process with legacy handler.")
+        handle_add_new_item(response)
       end
     end
   end

@@ -97,6 +97,38 @@ class AhkBridge
     end
   end
 
+  def lookup_item_by_url(url, database)
+    puts "🔍 Looking up item by URL: #{url}".colorize(:blue)
+    
+    # Extract product ID and find item
+    prod_id = database.extract_prod_id_from_url(url)
+    
+    if prod_id && (item = database.find_item_by_prod_id(prod_id))
+      # Return existing item data
+      response = {
+        type: 'lookup_result',
+        found: true,
+        description: item[:description] || '',
+        modifier: item[:modifier] || '',
+        priority: item[:priority] || 1,
+        default_quantity: item[:default_quantity] || 1,
+        subscribable: item[:subscribable] || false
+      }
+      puts "✅ Found existing item: #{item[:description]}".colorize(:green)
+    else
+      # Item not found
+      response = {
+        type: 'lookup_result',
+        found: false
+      }
+      puts "ℹ️ Item not found in database".colorize(:yellow)
+    end
+    
+    # Send lookup result as a command to AHK
+    send_command("LOOKUP_RESULT|#{response.to_json}")
+    response
+  end
+
   def session_complete
     send_command('SESSION_COMPLETE')
     read_response
@@ -150,6 +182,12 @@ class AhkBridge
     # All responses should now be JSON format
     begin
       parsed = JSON.parse(response_text, symbolize_names: true)
+
+      # Normalize status values to lowercase at the lowest level, per user design
+      if parsed[:type]&.to_s == 'status' && parsed[:value].is_a?(String)
+        parsed[:value].downcase!
+      end
+
       return parsed
     rescue JSON::ParserError => e
       puts "⚠️ Failed to parse JSON response: #{response_text}"
@@ -173,7 +211,13 @@ class AhkBridge
     puts "  → AHK Command: #{command.split('|').first}".colorize(:light_black)
   end
 
+  def write_response(response)
+    File.write(RESPONSE_FILE, response)
+    puts "  ← Ruby Response: #{response}".colorize(:light_black)
+  end
+
   def wait_for_completion(timeout)
+    puts "  ⏳ Waiting for AHK completion... (timeout: #{timeout || 'none'})"
     # Clear any stale response file before starting
     File.delete(RESPONSE_FILE) if File.exist?(RESPONSE_FILE)
 
@@ -189,19 +233,25 @@ class AhkBridge
   def wait_loop
     loop do
         status = check_status
+
+        if status != 'UNKNOWN' # Avoid spamming the log
+            puts "  ⏳ wait_loop received status: '#{status}'"
+        end
         
         case status
         when 'READY'
+          puts "  ✅ wait_loop returning on READY"
           return true
         when 'COMPLETED'
           # Wait a moment to ensure AHK has finished writing response
+          puts "  ✅ wait_loop returning on COMPLETED"
           sleep(0.1)
           return true
         when 'ERROR'
           response = read_response
           raise "AHK Error: #{response}"
         when 'SHUTDOWN'
-          puts '  ℹ️ AutoHotkey script shutting down (user-initiated via Ctrl+Shift+Q)'
+          puts "  🛑 wait_loop returning on SHUTDOWN"
           return true
         when 'WAITING_FOR_USER'
           puts '🛑 AHK is waiting for user action...'.colorize(:yellow)

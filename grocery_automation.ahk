@@ -17,7 +17,7 @@ SendMode "Input"
 
 ^+a::{
     ; Add new item hotkey
-    FileAppend("Ctrl+Shift+A pressed - calling ShowAddItemDialogHotkey`n", "command_debug.txt")
+    WriteDebug("Ctrl+Shift+A pressed - calling ShowAddItemDialogHotkey")
     ShowAddItemDialogHotkey()
 }
 
@@ -32,6 +32,12 @@ ScriptDir := A_ScriptDir
 CommandFile := ScriptDir . "\ahk_command.txt"
 StatusFile := ScriptDir . "\ahk_status.txt"
 ResponseFile := ScriptDir . "\ahk_response.txt"
+
+; Centralized logging function
+WriteDebug(message) {
+    FileAppend(message . "`n", "command_debug.txt")
+}
+
 
 ; Global variables
 UserReady := false
@@ -160,6 +166,10 @@ ProcessCommand(command) {
         case "SESSION_COMPLETE":
             FileAppend("MATCHED SESSION_COMPLETE`n", "command_debug.txt")
             ProcessSessionComplete()
+        case "LOOKUP_RESULT":
+            FileAppend("MATCHED LOOKUP_RESULT`n", "command_debug.txt")
+            FileAppend("LOOKUP_RESULT param: " . param . "`n", "command_debug.txt")
+            ProcessLookupResult(param)
         case "ADD_ITEM_DIALOG":
             FileAppend("MATCHED ADD_ITEM_DIALOG`n", "command_debug.txt")
             ShowAddItemDialog(param)
@@ -524,50 +534,43 @@ WriteStatus(status) {
 }
 
 WriteResponseJSON(response_obj) {
+    ; First, generate the JSON string from the response object
+    json_response := ""
     try {
-        ; Convert to JSON and write to file - using manual JSON to avoid jsongo bugs
-        try {
-            json_response := jsongo.Stringify(response_obj)
-            ; Check if JSON is properly formatted (should start with { and have quoted properties)
-            if (!InStr(json_response, '{"') && InStr(json_response, '{')) {
-                ; jsongo generated malformed JSON, use manual approach
-                throw Error("jsongo malformed output")
-            }
-        } catch {
-            ; Manual JSON generation as fallback
-            json_parts := []
-            for key, value in response_obj {
-                if (IsObject(value)) {
-                    ; Handle arrays
-                    if (value.Has(1)) {
-                        array_items := []
-                        for item in value {
-                            array_items.Push('"' . StrReplace(StrReplace(String(item), '\', '\\'), '"', '\"') . '"')
-                        }
-                        json_parts.Push('"' . key . '": [' . array_items.Join(', ') . ']')
-                    }
-                } else {
-                    ; Handle strings and numbers
-                    if (IsNumber(value)) {
-                        json_parts.Push('"' . key . '": ' . value)
-                    } else {
-                        json_parts.Push('"' . key . '": "' . StrReplace(StrReplace(String(value), '\', '\\'), '"', '\"') . '"')
-                    }
+        json_response := jsongo.Stringify(response_obj)
+    } catch {
+        ; Fallback to manual JSON generation if jsongo fails
+                ; Fallback to manual JSON generation if jsongo fails
+        json_parts := []
+        for key, value in response_obj {
+            if (IsObject(value)) {
+                if (value.Has(1)) { ; Handle array
+                    array_items := []
+                    for item in value { array_items.Push('"' . StrReplace(StrReplace(String(item), '\', '\\'), '"', '\"') . '"') }
+                    json_parts.Push('"' . key . '": [' . array_items.Join(', ') . ']')
                 }
+            } else { ; Handle string/number
+                if (IsNumber(value)) { json_parts.Push('"' . key . '": ' . value) }
+                else { json_parts.Push('"' . key . '": "' . StrReplace(StrReplace(String(value), '\', '\\'), '"', '\"') . '"') }
             }
-            json_response := '{' . json_parts.Join(', ') . '}'
         }
-        
+        json_response := '{' . json_parts.Join(', ') . '}'
+    }
+    ; Now, write the generated JSON to the file in a robust way
+    ; Delete if exists, then append, which creates the file if it doesn't exist.
+    try {
         if FileExist(ResponseFile)
             FileDelete(ResponseFile)
         FileAppend(json_response, ResponseFile)
-        ToolTip("DEBUG: Wrote JSON response: " . SubStr(json_response, 1, 50) . "...", 400, 50)
+
+        ToolTip("DEBUG: Wrote JSON: " . SubStr(json_response, 1, 50) . "...", 400, 50)
         SetTimer(() => ToolTip("", 400, 50), -2000)
+
     } catch as e {
-        ; Fallback to simple text if JSON conversion fails
+        ; If all else fails, write a simple error message to the file
         if FileExist(ResponseFile)
             FileDelete(ResponseFile)
-        FileAppend("ERROR: " . e.message, ResponseFile)
+        FileAppend("FATAL_ERROR: Could not write response. Error: " . e.message, ResponseFile)
     }
 }
 
@@ -675,7 +678,7 @@ WriteResponse(response) {
 ResetForNextSession() {
     global UserReady
     UserReady := false
-    WriteStatus("WAITING_FOR_HOTKEY")
+    WriteStatus("COMPLETED")
     ; Tooltip is already set by ProcessSessionComplete, don't override it
 }
 
@@ -683,8 +686,8 @@ ResetForNextSession() {
 ; Shopping list processing complete
 ProcessSessionComplete() {
     FileAppend("ProcessSessionComplete called - setting completion tooltip`n", "command_debug.txt")
-    WriteResponse("session_reset")
-    WriteStatus("WAITING_FOR_HOTKEY")
+    WriteResponse("CONTINUE")
+    WriteStatus("COMPLETED")
     ShowPersistentStatus("Shopping list complete! Press Ctrl+Shift+A to add items or Ctrl+Shift+Q to quit")
     ResetForNextSession()
 }
@@ -701,20 +704,28 @@ ShowAddItemDialog(suggestedName) {
 }
 
 ShowAddItemDialogHotkey() {
-    FileAppend("ShowAddItemDialogHotkey called`n", "command_debug.txt")
+    WriteDebug("ShowAddItemDialogHotkey called")
     
     ; Get current URL (silent - doesn't write to response file)
     currentUrl := GetCurrentURLSilent()
-    FileAppend("Current URL captured: " . currentUrl . "`n", "command_debug.txt")
+    WriteDebug("Current URL captured: " . currentUrl)
     
-    ; Show dialog with empty suggested name (user triggered)
-    ShowAddItemDialogWithDefaults("", currentUrl)
+    ; Send lookup request to Ruby (non-blocking)
+    WriteDebug("Sending lookup request for URL: " . currentUrl)
+    SendLookupRequest(currentUrl)
+    
+    ; Show dialog immediately with "looking up" placeholder
+    WriteDebug("Showing dialog with lookup placeholder")
+    ShowAddItemDialogWithDefaults("< Looking up... >", currentUrl)
 }
 
 ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     ; Create dialog
     addItemGui := Gui("+AlwaysOnTop", "Add Item & Purchase")
     addItemGui.SetFont("s10")
+    
+    ; Store reference to dialog globally
+    CurrentAddItemDialog := addItemGui
     
     ; Description field
     addItemGui.Add("Text", , "Item Description (leave blank for purchase-only):")
@@ -771,6 +782,16 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     addItemGui.purchaseQuantityEdit := purchaseQuantityEdit
     addItemGui.currentUrl := currentUrl
     
+    ; Store control references globally for lookup updates
+    CurrentDialogControls := {
+        "descriptionEdit": descriptionEdit,
+        "modifierEdit": modifierEdit,
+        "priorityEdit": priorityEdit,
+        "defaultQuantityEdit": defaultQuantityEdit,
+        "subscribableCheckbox": subscribableCheckbox,
+        "quantityEdit": purchaseQuantityEdit
+    }
+    
     ; Button event handlers
     addButton.OnEvent("Click", (*) => AddAndPurchaseClickHandler(addItemGui))
     addOnlyButton.OnEvent("Click", (*) => AddOnlyClickHandler(addItemGui))
@@ -779,7 +800,10 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     ; Store purchase button and price edit references globally for click detection
     global CurrentPurchaseButton := addButton
     global CurrentPriceEdit := priceEdit
-    FileAppend("ShowAddItemDialog: Set CurrentPriceEdit reference`n", "command_debug.txt")
+    WriteDebug("ShowAddItemDialog: Set CurrentPriceEdit reference")
+    
+    ; Add cleanup handler when dialog is closed
+    addItemGui.OnEvent("Close", (*) => CleanupDialogReferences())
     
     ; Show dialog immediately
     addItemGui.Show()
@@ -859,8 +883,20 @@ AddAndPurchaseClickHandler(gui) {
     response_obj["price"] := price != "" ? Float(price) : ""
     response_obj["purchase_quantity"] := Integer(purchaseQuantity)
     
-    FileAppend("AddAndPurchaseClickHandler - writing JSON response`n", "command_debug.txt")
-    WriteResponseJSON(response_obj)
+    WriteDebug("AddAndPurchaseClickHandler - writing JSON response")
+    
+    ; Use new centralized response function
+    responseData := Map()
+    responseData["description"] := description
+    responseData["modifier"] := modifier
+    responseData["priority"] := priority
+    responseData["default_quantity"] := defaultQuantity
+    responseData["subscribable"] := subscribable
+    responseData["url"] := currentUrl
+    responseData["price"] := price != "" ? Float(price) : ""
+    responseData["purchase_quantity"] := Integer(purchaseQuantity)
+    
+    WriteResponseJSON(responseData)
     WriteStatus("COMPLETED")
     StopPriceDetection()
     gui.Destroy()
@@ -909,11 +945,19 @@ AddOnlyClickHandler(gui) {
         FileAppend("Captured fresh URL: " . currentUrl . "`n", "command_debug.txt")
     }
     
-    ; Format response without purchase info (original format with subscribable)
-    subscribable_text := subscribable ? "1" : "0"
-    response := description . "|" . modifier . "|" . priority . "|" . defaultQuantity . "|" . subscribable_text . "|" . currentUrl
-    FileAppend("AddOnlyClickHandler - writing response: " . response . "`n", "command_debug.txt")
-    WriteResponse(response)
+    ; Create JSON response
+    response_obj := Map()
+    response_obj["type"] := "add_and_purchase" ; Use same type as add_and_purchase
+    response_obj["description"] := description
+    response_obj["modifier"] := modifier
+    response_obj["priority"] := Integer(priority)
+    response_obj["default_quantity"] := Integer(defaultQuantity)
+    response_obj["subscribable"] := subscribable ? true : false
+    response_obj["url"] := currentUrl
+    response_obj["price"] := "" ; Empty price indicates "add only"
+    response_obj["purchase_quantity"] := 0
+
+    WriteResponseJSON(response_obj)
     WriteStatus("COMPLETED")
     StopPriceDetection()
     gui.Destroy()
@@ -1055,30 +1099,14 @@ StartPurchaseDetection() {
     CoordMode("Mouse", "Screen")
     MouseGetPos(&mouseX, &mouseY)
     
-    ; Show click position tooltip
-;    ToolTip("Click: " . mouseX . "," . mouseY . ", " . ButtonFound, mouseX + 10, mouseY + 10)
-;    SetTimer(() => ToolTip(), -1000)  ; Hide after 1 second
-    
-    ; Debug: log why clicks might be ignored
-    if (!ButtonFound) {
-        FileAppend("CLICK: " . mouseX . "," . mouseY . " IGNORED - ButtonFound=false`n", "command_debug.txt")
-        return
-    }
-    if (!CurrentPurchaseButton) {
-        FileAppend("CLICK: " . mouseX . "," . mouseY . " IGNORED - CurrentPurchaseButton=null`n", "command_debug.txt")
-        return
-    }
-    
     ; Log all clicks when button detection is active
     if (ButtonFound && CurrentPurchaseButton) {
-        FileAppend("CLICK: " . mouseX . "," . mouseY . " Region: " . ButtonRegion.left . "," . ButtonRegion.top . " to " . ButtonRegion.right . "," . ButtonRegion.bottom . " ", "command_debug.txt")
         
         ; Check if click is in Add to Cart button region
         inRegion := (mouseX >= ButtonRegion.left && mouseX <= ButtonRegion.right && 
                      mouseY >= ButtonRegion.top && mouseY <= ButtonRegion.bottom)
         
         if (inRegion) {
-            FileAppend("HIT - Changing button and starting price detection`n", "command_debug.txt")
             
             ; Change button state
             CurrentPurchaseButton.Text := "✅ Add & Purchase"
@@ -1208,7 +1236,7 @@ DetectSubscribable() {
             WinActivate(TargetWindowHandle)
             WinWaitActive(TargetWindowHandle, , 2)
         }
-    } catch Error as e {
+    } catch as e {
         FileAppend("DetectSubscribable: Could not activate window - " . e.Message . "`n", "command_debug.txt")
     }
     
@@ -1235,5 +1263,74 @@ DetectSubscribable() {
     } else {
         FileAppend("DetectSubscribable: Subscribe pattern NOT found - item is not subscribable`n", "command_debug.txt") 
         return false
+    }
+}
+
+; Send lookup request to Ruby
+SendLookupRequest(url) {
+    WriteDebug("Sending lookup request for URL: " . url)
+    
+    try {
+        ; Use existing WriteResponse with lookup request format
+        response_obj := Map()
+        response_obj["type"] := "lookup_request" 
+        response_obj["url"] := url
+        WriteResponseJSON(response_obj)
+        WriteDebug("Lookup request written to response file")
+    } catch as e {
+        WriteDebug("Failed to write lookup request: " . e.message)
+    }
+}
+
+
+
+; Global reference to current dialog for lookup updates
+CurrentAddItemDialog := ""
+CurrentDialogControls := ""
+
+; Clean up global dialog references
+CleanupDialogReferences() {
+    CurrentAddItemDialog := ""
+    CurrentDialogControls := ""
+    WriteDebug("Dialog references cleaned up")
+}
+
+; Process lookup result from Ruby
+ProcessLookupResult(jsonParam) {
+    WriteDebug("ProcessLookupResult called with: " . jsonParam)
+    
+    ; Only process if we have an active dialog
+    if (!CurrentAddItemDialog || !CurrentDialogControls) {
+        WriteDebug("No active dialog to update")
+        return
+    }
+    
+    try {
+        ; Parse the JSON response
+        lookupData := jsongo.Parse(jsonParam)
+        
+        if (lookupData.found) {
+            WriteDebug("Updating dialog with found item data")
+            
+            ; Update dialog fields with lookup data
+            CurrentDialogControls["descriptionEdit"].Text := lookupData.description
+            CurrentDialogControls["modifierEdit"].Text := lookupData.modifier
+            CurrentDialogControls["priorityEdit"].Text := lookupData.priority
+            CurrentDialogControls["defaultQuantityEdit"].Text := lookupData.default_quantity
+            CurrentDialogControls["subscribableCheckbox"].Value := lookupData.subscribable ? 1 : 0
+            CurrentDialogControls["quantityEdit"].Text := lookupData.default_quantity
+            
+            WriteDebug("Dialog updated with: " . lookupData.description)
+        } else {
+            WriteDebug("Item not found - clearing placeholder text")
+            ; Clear the "< Looking up... >" placeholder
+            CurrentDialogControls.descriptionEdit.Text := ""
+        }
+    } catch as e {
+        WriteDebug("Error processing lookup result: " . e.message)
+        ; Clear placeholder on error
+        if (CurrentDialogControls["descriptionEdit"]) {
+            CurrentDialogControls["descriptionEdit"].Text := ""
+        }
     }
 }

@@ -13,7 +13,7 @@
       "type": "autohotkey",
       "request": "launch",
       "name": "Debug: AHK Script",
-      "program": "${workspaceFolder}/simple_test.ahk"
+      "program": "${workspaceFolder}/grocery_automation.ahk"
     }
   ]
 }
