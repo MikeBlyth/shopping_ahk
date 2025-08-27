@@ -156,19 +156,16 @@ class AhkBridge
     end
     
     # Clean up files
-    [COMMAND_FILE, STATUS_FILE, RESPONSE_FILE].each do |file|
+    [COMMAND_FILE, RESPONSE_FILE].each do |file|
       File.delete(file) if File.exist?(file)
     end
   end
 
   def check_status
-    return 'UNKNOWN' unless File.exist?(STATUS_FILE)
-
-    status = File.read(STATUS_FILE).strip
-    # Delete the status file immediately after reading to prevent stale data
-    File.delete(STATUS_FILE) if File.exist?(STATUS_FILE)
-    sleep(0.1) # Small delay to ensure file system operations complete
-    status
+    # DEPRECATED: Status is now communicated through JSON responses only
+    # This method is kept for backward compatibility but should not be used
+    # Use read_response and check response[:type] == 'status' instead
+    return 'UNKNOWN'
   end
 
   def read_response
@@ -203,7 +200,6 @@ class AhkBridge
     [COMMAND_FILE, RESPONSE_FILE].each do |file|
       File.delete(file) if File.exist?(file)
     end
-    # Don't delete STATUS_FILE - let AHK manage it
   end
 
   def write_command(command)

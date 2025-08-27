@@ -156,46 +156,39 @@ class WalmartGroceryAssistant
   end
 
   def setup_ahk
-    # Always start fresh - kill any existing AutoHotkey and clean files
-    puts '🧹 Cleaning up any existing AutoHotkey processes...'
+    # Clean up any stale communication files
+    puts '🧹 Cleaning up communication files...'
     cleanup_existing_ahk
 
-    # Start fresh AutoHotkey script
-    puts '🚀 Starting fresh AutoHotkey script...'
+    # Start AutoHotkey script
+    puts '🚀 Starting AutoHotkey script...'
     start_ahk_script
     sleep(1) # Give it time to start
 
-    # Check if it started successfully
-    if ahk_process_running?
-      status = @ahk.check_status
-      if status == 'READY'
-        puts '✅ AutoHotkey started successfully!'
-        wait_for_hotkey_signal
-      else
-        puts "❌ AutoHotkey started but in unexpected state: #{status}"
-        exit
+    # Wait indefinitely for READY message via JSON response
+    puts '⏳ Waiting for AutoHotkey to be ready...'
+    loop do
+      sleep(1)
+      # Check for response file
+      next unless File.exist?(@ahk.class::RESPONSE_FILE)
+      
+      response = @ahk.read_response
+      next if response.nil? || response.empty?
+      
+      if response[:type] == 'status' && response[:value] == 'ready'
+        puts '✅ AutoHotkey is ready!'
+        break
       end
-    else
-      puts '❌ Failed to start AutoHotkey script. Please check that AutoHotkey is installed.'
-      exit
     end
   end
 
   def cleanup_existing_ahk
-    # Kill any existing AutoHotkey processes
-    system('taskkill /F /IM AutoHotkey*.exe 2>nul')
-
     # Clean up communication files
-    [@ahk.class::COMMAND_FILE, @ahk.class::STATUS_FILE, @ahk.class::RESPONSE_FILE].each do |file|
+    [@ahk.class::COMMAND_FILE, @ahk.class::RESPONSE_FILE].each do |file|
       File.delete(file) if File.exist?(file)
     end
   end
 
-  def ahk_process_running?
-    # Check if AutoHotkey process is actually running
-    result = `tasklist /FI "IMAGENAME eq AutoHotkey*" 2>nul`
-    result.include?('AutoHotkey')
-  end
 
   def start_ahk_script
     script_path = File.join(__dir__, 'grocery_automation.ahk')
@@ -209,24 +202,6 @@ class WalmartGroceryAssistant
     system("start \"\" \"#{script_path}\"")
   end
 
-  def wait_for_hotkey_signal
-    puts '🎯 AutoHotkey is ready and waiting for you!'
-    puts '📋 Instructions:'
-    puts '   1. Open your browser to walmart.com'
-    puts '   2. System will automatically start processing your shopping list'
-    puts ''
-    puts '⏳ Waiting for ready signal...'
-
-    # Wait for user to press the hotkey
-    loop do
-      sleep(1)
-      current_status = @ahk.check_status
-      break if current_status == 'READY'
-    end
-
-    puts '✅ Ready signal received! Starting automation...'
-    sleep(1)
-  end
 
   def sync_database_from_sheets
     return unless @sheets_sync
@@ -489,21 +464,30 @@ class WalmartGroceryAssistant
     loop do
       sleep(1)
 
-      # Check AHK status - when user presses Ctrl+Shift+A, status will change
-      status = @ahk.check_status
+      # Check for response file instead of status
+      next unless File.exist?(@ahk.class::RESPONSE_FILE)
+      
+      response = @ahk.read_response
+      next if response.nil? || response.empty?
 
-      case status
-      when 'COMPLETED'
-        # User completed an action - check if there's a response
-        response = @ahk.read_response
-        if response && !response.empty? && response[:type] != 'status'
+      case response[:type]
+      when 'status'
+        case response[:value]
+        when 'quit', 'shutdown'
+          puts '   🛑 User requested shutdown during wait'
+          break
+        end
+      when 'add_and_purchase'
+        handle_shopping_list_completion(item_name, response)
+        puts "   ✅ Item '#{item_name}' completed"
+        break
+      else
+        # Handle other response types that might complete the item
+        if response[:type] != 'status'
           handle_shopping_list_completion(item_name, response)
           puts "   ✅ Item '#{item_name}' completed"
           break
         end
-      when 'SHUTDOWN'
-        puts '   🛑 User requested shutdown during wait'
-        break
       end
     end
   end

@@ -61,7 +61,7 @@ try {
     ; Ignore errors if files don't exist
 }
 
-WriteStatus("WAITING_FOR_HOTKEY")
+; WriteStatus("WAITING_FOR_HOTKEY")
 
 ; Clear debug log at startup
 try {
@@ -84,7 +84,8 @@ MsgBox("AutoHotkey ready!`n`nPlease select your browser window with Walmart.com 
 
 ; Auto-start after initial dialog closes
 UserReady := true
-WriteStatus("READY")
+SendStatus("ready")
+MsgBox("Status ready sent via JSON")
 TargetWindowHandle := WinExist("A")
 
 if !TargetWindowHandle {
@@ -136,8 +137,6 @@ ProcessCommand(command) {
         FileAppend("Parsed pipe-delimited - action: '" . action . "', param: '" . param . "'`n", "command_debug.txt")
     }
     
-    WriteStatus("PROCESSING")
-    
     switch action {
         case "OPEN_URL":
             FileAppend("MATCHED OPEN_URL`n", "command_debug.txt")
@@ -179,13 +178,11 @@ ProcessCommand(command) {
             ; Silently close all dialogs
             CloseAllDialogs()
             
-            WriteStatus("SHUTDOWN")
             ; Silent shutdown - no MsgBox
             ExitApp()
         default:
             FileAppend("UNKNOWN COMMAND - action: '" . action . "', original: '" . command . "'`n", "command_debug.txt")
-            WriteStatus("ERROR")
-            WriteResponse("Unknown command: " . action)
+            SendError("Unknown command: " . action)
     }
 }
 
@@ -196,7 +193,7 @@ OpenURL(url) {
     PasteURL(url)
     
     ; Return immediately - don't wait for page loading
-    WriteStatus("COMPLETED")
+    SendStatus("completed")
 }
 
 PasteURL(url) {
@@ -231,7 +228,7 @@ SearchWalmart(searchTerm) {
     Sleep(2000)
     
     ; Don't wait for user here - let the next command (SHOW_ITEM_PROMPT) handle user interaction
-    WriteStatus("COMPLETED")
+    SendStatus("completed")
 }
 
 GetCurrentURL() {
@@ -247,8 +244,7 @@ GetCurrentURL() {
     ; Clear clipboard
     A_Clipboard := ""
     
-    WriteResponse(currentURL)
-    WriteStatus("COMPLETED")
+    SendURL(currentURL)
 }
 
 GetCurrentURLSilent() {
@@ -269,14 +265,12 @@ GetCurrentURLSilent() {
 
 ActivateBrowserCommand() {
     ; Since user manually switched to browser, just confirm it's active
-    WriteStatus("COMPLETED")
-    WriteResponse("Browser active (user controlled)")
+    SendStatus("browser_active")
 }
 
 ShowMessage(param) {
     MsgBox(param, "Walmart Shopping Assistant", "OK")
-    WriteResponse("ok")
-    WriteStatus("COMPLETED")
+    SendStatus("ok")
 }
 
 ShowItemPrompt(param) {
@@ -350,7 +344,6 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     
     ; Show dialog immediately
     purchaseGui.Show()
-    WriteStatus("WAITING_FOR_INPUT")
     
     ; Start purchase detection after dialog is shown
     SetTimer(() => StartPurchaseDetection(), -100)  ; Run once after 100ms delay
@@ -377,9 +370,7 @@ PurchaseClickHandler(gui) {
             response_obj["url"] := current_url
             WriteResponseJSON(response_obj)
         } else {
-            response_obj := Map()
-            response_obj["type"] := "continue"
-            WriteResponseJSON(response_obj)
+           SendStatus("skipped")
         }
     } else {
         ; Valid price entered - record purchase
@@ -407,24 +398,22 @@ PurchaseClickHandler(gui) {
         WriteResponseJSON(response_obj)
     }
     
-    WriteStatus("COMPLETED")
     StopPriceDetection()
     gui.Destroy()
 }
 
 SkipClickHandler(gui) {
     ; Skip purchase, but for new items, still capture URL
-    response_obj := Map()
     if !gui.is_known {
+        response_obj := Map()
         current_url := GetCurrentURLSilent()
         response_obj["type"] := "save_url_only"
         response_obj["url"] := current_url
+        WriteResponseJSON(response_obj)
     } else {
-        response_obj["type"] := "skipped"
+        SendStatus("skipped")
     }
-    WriteResponseJSON(response_obj)
     
-    WriteStatus("COMPLETED")
     StopPriceDetection()
     gui.Destroy()
 }
@@ -433,22 +422,27 @@ SearchAgainClickHandler(gui) {
     ; User wants to search for alternatives - return like selecting "search for new item" in multi-choice
     response_obj := Map()
     response_obj["type"] := "choice"
-    response_obj["choice_index"] := 999  ; Use high number to indicate "search for new item" option
+    response_obj["value"] := 999  ; Use high number to indicate "search for new item" option
     WriteResponseJSON(response_obj)
-    WriteStatus("COMPLETED")
     StopPriceDetection()
     gui.Destroy()
 }
 
 GetCurrentURLAndRespond(responsePrefix) {
+    ; DEPRECATED: This function should not be used anymore - all responses should be JSON
     ; Get current URL from browser (silent)
     current_url := GetCurrentURLSilent()
     
+    ; Convert to JSON format
+    response_obj := Map()
     if responsePrefix = "save_url_only" {
-        WriteResponse("save_url_only|" . current_url)
+        response_obj["type"] := "save_url_only"
+        response_obj["url"] := current_url
     } else {
-        WriteResponse(responsePrefix . "|" . current_url)
+        response_obj["type"] := responsePrefix
+        response_obj["url"] := current_url
     }
+    WriteResponseJSON(response_obj)
 }
 
 ShowMultipleChoice(param) {
@@ -482,37 +476,36 @@ ShowMultipleChoice(param) {
         choice_text := Trim(result.Value)
         
         if choice_text = "" && allow_skip {
-            WriteResponse("skipped")
+            SendStatus("skipped")
         } else {
             ; Validate numeric choice
             try {
                 choice_num := Integer(choice_text)
                 if choice_num >= 1 && choice_num <= options.Length {
-                    WriteResponse("choice|" . choice_num)
+                    SendChoice(choice_num)
                 } else {
-                    WriteResponse("cancelled")
+                    SendStatus("cancelled")
                 }
             } catch {
-                WriteResponse("cancelled")
+                SendStatus("cancelled")
             }
         }
     } else {
-        WriteResponse("cancelled")
+        SendStatus("cancelled")
     }
-    
-    WriteStatus("COMPLETED")
 }
 
 GetPriceInput() {
     result := InputBox("Enter the current price (e.g., 3.45):", "Record Price", "w300 h150")
     
     if result.Result = "OK" && result.Value != "" {
-        WriteResponse("price|" . result.Value)
+        response_obj := Map()
+        response_obj["type"] := "price"
+        response_obj["value"] := Float(result.Value)
+        WriteResponseJSON(response_obj)
     } else {
-        WriteResponse("cancelled")
+        SendStatus("cancelled")
     }
-    
-    WriteStatus("COMPLETED")
 }
 
 UriEncode(str) {
@@ -565,6 +558,38 @@ WriteResponseJSON(response_obj) {
     }
 }
 
+; Helper function for status responses
+SendStatus(statusValue) {
+    response_obj := Map()
+    response_obj["type"] := "status"
+    response_obj["value"] := statusValue
+    WriteResponseJSON(response_obj)
+}
+
+; Helper function for choice responses
+SendChoice(choiceValue) {
+    response_obj := Map()
+    response_obj["type"] := "choice"
+    response_obj["value"] := choiceValue
+    WriteResponseJSON(response_obj)
+}
+
+; Helper function for URL responses
+SendURL(urlValue) {
+    response_obj := Map()
+    response_obj["type"] := "url"
+    response_obj["value"] := urlValue
+    WriteResponseJSON(response_obj)
+}
+
+; Helper function for error responses
+SendError(errorValue) {
+    response_obj := Map()
+    response_obj["type"] := "error"
+    response_obj["value"] := errorValue
+    WriteResponseJSON(response_obj)
+}
+
 WriteResponse(response) {
     try {
         ; Delete existing response file
@@ -588,7 +613,6 @@ WriteResponse(response) {
 ResetForNextSession() {
     global UserReady
     UserReady := false
-    WriteStatus("COMPLETED")
     ; Tooltip is already set by ProcessSessionComplete, don't override it
 }
 
@@ -596,8 +620,6 @@ ResetForNextSession() {
 ; Shopping list processing complete
 ProcessSessionComplete() {
     FileAppend("ProcessSessionComplete called - setting completion tooltip`n", "command_debug.txt")
-    WriteResponse("CONTINUE")
-    WriteStatus("COMPLETED")
     ShowPersistentStatus("Shopping list complete! Press Ctrl+Shift+A to add items or Ctrl+Shift+Q to quit")
     ResetForNextSession()
 }
@@ -717,7 +739,6 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     
     ; Show dialog immediately
     addItemGui.Show()
-    WriteStatus("WAITING_FOR_INPUT")
     
     ; Start purchase detection after dialog is shown
     SetTimer(() => StartPurchaseDetection(), -100)  ; Run once after 100ms delay
@@ -807,7 +828,6 @@ AddAndPurchaseClickHandler(gui) {
     responseData["purchase_quantity"] := Integer(purchaseQuantity)
     
     WriteResponseJSON(responseData)
-    WriteStatus("COMPLETED")
     StopPriceDetection()
     gui.Destroy()
     
@@ -868,7 +888,6 @@ AddOnlyClickHandler(gui) {
     response_obj["purchase_quantity"] := 0
 
     WriteResponseJSON(response_obj)
-    WriteStatus("COMPLETED")
     StopPriceDetection()
     gui.Destroy()
     
@@ -877,8 +896,7 @@ AddOnlyClickHandler(gui) {
 }
 
 CancelItemClickHandler(gui) {
-    WriteResponse("cancelled")
-    WriteStatus("COMPLETED")
+    SendStatus("cancelled")
     StopPriceDetection()
     ; Silent close - no messages
     gui.Destroy()
@@ -969,8 +987,8 @@ PerformQuit() {
     ; Silently close all dialogs
     CloseAllDialogs()
     
-    WriteResponse("quit")  ; Tell Ruby we're quitting
-    WriteStatus("SHUTDOWN")
+    ; Tell Ruby we're quitting using JSON format
+    SendStatus("quit")
     ; Remove MsgBox - silent shutdown
     ExitApp()
 }
