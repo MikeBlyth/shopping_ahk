@@ -16,7 +16,8 @@ SendMode "Input"
 }
 
 ^+a::{
-    ; Ad    WriteDebug("Ctrl+Shift+A pressed - calling ShowAddItemDialogHotkey")
+    ; Add new item hotkey
+    WriteDebug("Ctrl+Shift+A pressed - calling ShowAddItemDialogHotkey")
     ShowAddItemDialogHotkey()
 }
 
@@ -533,143 +534,53 @@ WriteStatus(status) {
 }
 
 WriteResponseJSON(response_obj) {
-    ; First, generate the JSON string from the response object
-    json_response := ""
     try {
+        ; Try jsongo first
         json_response := jsongo.Stringify(response_obj)
     } catch {
-        ; Fallback to manual JSON generation if jsongo fails
-                ; Fallback to manual JSON generation if jsongo fails
+        ; Manual JSON fallback
         json_parts := []
         for key, value in response_obj {
-            if (IsObject(value)) {
-                if (value.Has(1)) { ; Handle array
-                    array_items := []
-                    for item in value { array_items.Push('"' . StrReplace(StrReplace(String(item), '\', '\\'), '"', '\"') . '"') }
-                    json_parts.Push('"' . key . '": [' . array_items.Join(', ') . ']')
-                }
-            } else { ; Handle string/number
-                if (IsNumber(value)) { json_parts.Push('"' . key . '": ' . value) }
-                else { json_parts.Push('"' . key . '": "' . StrReplace(StrReplace(String(value), '\', '\\'), '"', '\"') . '"') }
+            if (IsNumber(value)) {
+                json_parts.Push('"' . key . '": ' . value)
+            } else {
+                ; Escape quotes and backslashes in string values
+                escaped_value := StrReplace(StrReplace(String(value), '\', '\\'), '"', '\"')
+                json_parts.Push('"' . key . '": "' . escaped_value . '"')
             }
         }
         json_response := '{' . json_parts.Join(', ') . '}'
     }
-    ; Now, write the generated JSON to the file in a robust way
-    ; Delete if exists, then append, which creates the file if it doesn't exist.
+    
+    ; Write to response file
     try {
         if FileExist(ResponseFile)
             FileDelete(ResponseFile)
         FileAppend(json_response, ResponseFile)
-
-        ToolTip("DEBUG: Wrote JSON: " . SubStr(json_response, 1, 50) . "...", 400, 50)
-        SetTimer(() => ToolTip("", 400, 50), -2000)
-
     } catch as e {
-        ; If all else fails, write a simple error message to the file
+        ; Fallback error handling
         if FileExist(ResponseFile)
             FileDelete(ResponseFile)
-        FileAppend("FATAL_ERROR: Could not write response. Error: " . e.message, ResponseFile)
+        FileAppend("ERROR: " . e.message, ResponseFile)
     }
 }
 
 WriteResponse(response) {
     try {
-        ; Convert all responses to JSON format for consistency
-        response_obj := Map()
-        
-        ; Parse response string to determine type and data
-        if (response = "ok" || response = "cancelled" || response = "skipped" || response = "continue" || response = "session_reset" || response = "quit") {
-            ; Simple status responses
-            response_obj["type"] := "status"
-            response_obj["value"] := response
-        } else if (InStr(response, "|") > 0) {
-            ; Pipe-delimited responses - convert to structured format
-            parts := StrSplit(response, "|")
-            response_obj["type"] := parts[1]
-            
-            switch parts[1] {
-                case "choice":
-                    response_obj["value"] := Integer(parts[2])
-                case "price":
-                    response_obj["value"] := Float(parts[2])
-                case "purchase":
-                    response_obj["price"] := Float(parts[2])
-                    response_obj["quantity"] := Integer(parts[3])
-                case "purchase_new":
-                    response_obj["price"] := Float(parts[2])
-                    response_obj["quantity"] := Integer(parts[3])
-                    response_obj["url"] := parts.Length >= 4 ? parts[4] : ""
-                case "save_url_only":
-                    response_obj["url"] := parts[2]
-                case "add_and_purchase":
-                    response_obj["description"] := parts[2]
-                    response_obj["modifier"] := parts[3]
-                    response_obj["priority"] := Integer(parts[4])
-                    response_obj["default_quantity"] := Integer(parts[5])
-                    response_obj["url"] := parts[6]
-                    response_obj["price"] := Float(parts[7])
-                    response_obj["purchase_quantity"] := Integer(parts[8])
-                case "search_again":
-                    response_obj["search_term"] := parts[2]
-                default:
-                    ; For unknown pipe-delimited formats, store as array
-                    response_obj["data"] := []
-                    loop parts.Length - 1 {
-                        response_obj["data"].Push(parts[A_Index + 1])
-                    }
-            }
-        } else {
-            ; Simple string response (like URL)
-            response_obj["type"] := "data"
-            response_obj["value"] := response
-        }
-        
-        ; Convert to JSON and write to file - using manual JSON to avoid jsongo bugs
-        try {
-            json_response := jsongo.Stringify(response_obj)
-            ; Check if JSON is properly formatted (should start with { and have quoted properties)
-            if (!InStr(json_response, '{"') && InStr(json_response, '{')) {
-                ; jsongo generated malformed JSON, use manual approach
-                throw Error("jsongo malformed output")
-            }
-        } catch {
-            ; Manual JSON generation as fallback
-            json_parts := []
-            for key, value in response_obj {
-                if (IsObject(value)) {
-                    ; Handle arrays
-                    if (value.Has(1)) {
-                        array_items := []
-                        for item in value {
-                            array_items.Push('"' . StrReplace(StrReplace(String(item), '\', '\\'), '"', '\"') . '"')
-                        }
-                        json_parts.Push('"' . key . '": [' . array_items.Join(', ') . ']')
-                    }
-                } else {
-                    ; Handle strings and numbers
-                    if (IsNumber(value)) {
-                        json_parts.Push('"' . key . '": ' . value)
-                    } else {
-                        json_parts.Push('"' . key . '": "' . StrReplace(StrReplace(String(value), '\', '\\'), '"', '\"') . '"')
-                    }
-                }
-            }
-            json_response := '{' . json_parts.Join(', ') . '}'
-        }
-        
+        ; Delete existing response file
         if FileExist(ResponseFile)
             FileDelete(ResponseFile)
-        FileAppend(json_response, ResponseFile)
-        ToolTip("DEBUG: Wrote JSON response: " . SubStr(json_response, 1, 50) . "...", 400, 50)
-        SetTimer(() => ToolTip("", 400, 50), -2000)  ; Clear debug tooltip after 2 seconds
-    } catch as e {
-        ; Fallback to simple text if JSON conversion fails
-        if FileExist(ResponseFile)
-            FileDelete(ResponseFile)
+        ; Write response as plain text
         FileAppend(response, ResponseFile)
-        ToolTip("DEBUG: JSON failed, wrote simple response: " . response, 400, 50)
-        SetTimer(() => ToolTip("", 400, 50), -3000)
+    } catch as e {
+        ; If file operations fail, try one more time
+        try {
+            if FileExist(ResponseFile)
+                FileDelete(ResponseFile)
+            FileAppend("ERROR: " . e.message, ResponseFile)
+        } catch {
+            ; Silent failure - don't crash the script
+        }
     }
 }
 
@@ -783,12 +694,12 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     
     ; Store control references globally for lookup updates
     CurrentDialogControls := {
-        "descriptionEdit": descriptionEdit,
-        "modifierEdit": modifierEdit,
-        "priorityEdit": priorityEdit,
-        "defaultQuantityEdit": defaultQuantityEdit,
-        "subscribableCheckbox": subscribableCheckbox,
-        "quantityEdit": purchaseQuantityEdit
+        descriptionEdit: descriptionEdit,
+        modifierEdit: modifierEdit,
+        priorityEdit: priorityEdit,
+        defaultQuantityEdit: defaultQuantityEdit,
+        subscribableCheckbox: subscribableCheckbox,
+        quantityEdit: purchaseQuantityEdit
     }
     
     ; Button event handlers
@@ -1312,12 +1223,12 @@ ProcessLookupResult(jsonParam) {
             WriteDebug("Updating dialog with found item data")
             
             ; Update dialog fields with lookup data
-            CurrentDialogControls["descriptionEdit"].Text := lookupData.description
-            CurrentDialogControls["modifierEdit"].Text := lookupData.modifier
-            CurrentDialogControls["priorityEdit"].Text := lookupData.priority
-            CurrentDialogControls["defaultQuantityEdit"].Text := lookupData.default_quantity
-            CurrentDialogControls["subscribableCheckbox"].Value := lookupData.subscribable ? 1 : 0
-            CurrentDialogControls["quantityEdit"].Text := lookupData.default_quantity
+            CurrentDialogControls.descriptionEdit.Text := lookupData.description
+            CurrentDialogControls.modifierEdit.Text := lookupData.modifier
+            CurrentDialogControls.priorityEdit.Text := lookupData.priority
+            CurrentDialogControls.defaultQuantityEdit.Text := lookupData.default_quantity
+            CurrentDialogControls.subscribableCheckbox.Value := lookupData.subscribable ? 1 : 0
+            CurrentDialogControls.quantityEdit.Text := lookupData.default_quantity
             
             WriteDebug("Dialog updated with: " . lookupData.description)
         } else {
@@ -1328,8 +1239,8 @@ ProcessLookupResult(jsonParam) {
     } catch as e {
         WriteDebug("Error processing lookup result: " . e.message)
         ; Clear placeholder on error
-        if (CurrentDialogControls["descriptionEdit"]) {
-            CurrentDialogControls["descriptionEdit"].Text := ""
+        if (CurrentDialogControls.descriptionEdit) {
+            CurrentDialogControls.descriptionEdit.Text := ""
         }
     }
 }
