@@ -1,6 +1,7 @@
 # Walmart Grocery Automation System - Additional Instructions
 
 ## Current System State
+- ❌ **TEMPORARILY BROKEN**: AutoHotkey script crashes with access violation (fixed corrupted code structure Aug 27, but still has loading issues)
 - ✅ **FULLY WORKING**: Walmart grocery automation system is stable and production-ready
 - ✅ **Ctrl+Shift+A item addition**: Works reliably, items properly saved to database
 - ✅ **Persistent status window**: Visible, styled status display with proper positioning
