@@ -14,7 +14,7 @@ class WalmartGroceryAssistant
     @ahk = AhkBridge.new
     @db = Database.instance
     @sheets_sync = GoogleSheetsIntegration.create_sync_client
-    @sync_completed = false  # Flag to prevent double sync
+    @sync_completed = false # Flag to prevent double sync
 
     # Setup centralized logging
     @logger = Logger.new(STDOUT)
@@ -23,7 +23,7 @@ class WalmartGroceryAssistant
       case severity
       when 'DEBUG'
         "🔍 DEBUG: #{msg}\n"
-      when 'INFO' 
+      when 'INFO'
         "ℹ️ #{msg}\n"
       when 'WARN'
         "⚠️ #{msg}\n".colorize(:yellow)
@@ -93,12 +93,12 @@ class WalmartGroceryAssistant
     @logger.debug('Returned from post_list_actions')
 
     # Sync database items back to Google Sheets when user is done
-    unless @sync_completed
+    if @sync_completed
+      puts '✅ Sheets already synced - skipping duplicate sync'
+    else
       puts '💾 Syncing database items to Google Sheets...'
       sync_database_to_sheets
       @sync_completed = true
-    else
-      puts '✅ Sheets already synced - skipping duplicate sync'
     end
   rescue StandardError => e
     puts "\n❌ An error occurred: #{e.message}"
@@ -168,7 +168,7 @@ class WalmartGroceryAssistant
     # Check if it started successfully
     if ahk_process_running?
       status = @ahk.check_status
-      if status == 'WAITING_FOR_HOTKEY'
+      if status == 'READY'
         puts '✅ AutoHotkey started successfully!'
         wait_for_hotkey_signal
       else
@@ -539,7 +539,7 @@ class WalmartGroceryAssistant
       default_quantity = parsed_response[:default_quantity] || 1
       # Convert AHK integer (1/0) to proper boolean
       subscribable_raw = parsed_response[:subscribable] || false
-      subscribable = subscribable_raw == 1 || subscribable_raw == true
+      subscribable = [1, true].include?(subscribable_raw)
       url = parsed_response[:url]
       price = parsed_response[:price]
       purchase_quantity = parsed_response[:purchase_quantity] || 1
@@ -621,10 +621,10 @@ class WalmartGroceryAssistant
     # We are simplifying to only handle the modern JSON format.
     if parsed_response[:type]&.to_s == 'add_and_purchase'
       @logger.debug('Calling handle_add_and_purchase_json')
-      return handle_add_and_purchase_json(parsed_response)
+      handle_add_and_purchase_json(parsed_response)
     else
       @logger.error("handle_add_new_item received an unexpected type: '#{parsed_response[:type]}'. This may indicate a legacy message from AHK.")
-      return nil
+      nil
     end
   end
 
@@ -806,7 +806,7 @@ class WalmartGroceryAssistant
     default_quantity = parsed_response[:default_quantity] || 1
     # Convert AHK integer (1/0) to proper boolean
     subscribable_raw = parsed_response[:subscribable] || false
-    subscribable = subscribable_raw == 1 || subscribable_raw == true
+    subscribable = [1, true].include?(subscribable_raw)
     url = parsed_response[:url]&.strip || ''
     price = parsed_response[:price]
     purchase_quantity = parsed_response[:purchase_quantity] || 1
@@ -1016,15 +1016,15 @@ class WalmartGroceryAssistant
       # Still record in database
       if db_item && db_item[:prod_id]
         # Update subscribable field if provided and different
-        if parsed_response[:subscribable] != nil
+        unless parsed_response[:subscribable].nil?
           # Convert AHK integer (1/0) to proper boolean
-          subscribable_bool = parsed_response[:subscribable] == 1 || parsed_response[:subscribable] == true
+          subscribable_bool = [1, true].include?(parsed_response[:subscribable])
           if subscribable_bool != db_item[:subscribable]
             @db.update_item(db_item[:prod_id], { subscribable: subscribable_bool })
             puts "📦 Updated subscribable status: #{db_item[:description]} → #{subscribable_bool ? 'Yes' : 'No'}"
           end
         end
-        
+
         price_cents = (parsed_response[:price] * 100).to_i
         @db.record_purchase(
           prod_id: db_item[:prod_id],
@@ -1208,9 +1208,7 @@ class WalmartGroceryAssistant
 
     loop do
       # Wait for a response file to appear, checking every 200ms
-      while !File.exist?(@ahk.class::RESPONSE_FILE)
-        sleep(0.2)
-      end
+      sleep(0.2) until File.exist?(@ahk.class::RESPONSE_FILE)
 
       # File exists, read and delete it
       response = @ahk.read_response

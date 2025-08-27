@@ -16,8 +16,7 @@ SendMode "Input"
 }
 
 ^+a::{
-    ; Add new item hotkey
-    WriteDebug("Ctrl+Shift+A pressed - calling ShowAddItemDialogHotkey")
+    ; Ad    WriteDebug("Ctrl+Shift+A pressed - calling ShowAddItemDialogHotkey")
     ShowAddItemDialogHotkey()
 }
 
@@ -1332,5 +1331,34 @@ ProcessLookupResult(jsonParam) {
         if (CurrentDialogControls["descriptionEdit"]) {
             CurrentDialogControls["descriptionEdit"].Text := ""
         }
+    WinWaitActive(TargetWindowHandle, , 2)
+        }
+    } catch Error as e {
+        FileAppend("DetectSubscribable: Could not activate window - " . e.Message . "`n", "command_debug.txt")
+    }
+    
+    ; Search same area as price detection (right 25% of screen, vertically 25-75%)
+    screenWidth := A_ScreenWidth  
+    screenHeight := A_ScreenHeight
+    
+    ; Define search area: right 25%, vertically 25-75% (same as price detection)
+    x1 := Floor(screenWidth * 0.75)
+    x2 := screenWidth
+    y1 := Floor(screenHeight * 0.25)
+    y2 := Floor(screenHeight * 0.75)
+    
+    FileAppend("DetectSubscribable: Searching region " . x1 . "," . y1 . " to " . x2 . "," . y2 . " (same as price detection)`n", "command_debug.txt")
+    
+    ; Use FindText to detect subscribe pattern with moderate tolerance
+    X := ""
+    Y := ""
+    result := FindText(&X, &Y, x1, y1, x2, y2, 0, 0, SubscribePattern)
+    
+    if (result) {
+        FileAppend("DetectSubscribable: FOUND subscribe pattern - item is subscribable`n", "command_debug.txt")
+        return true
+    } else {
+        FileAppend("DetectSubscribable: Subscribe pattern NOT found - item is not subscribable`n", "command_debug.txt") 
+        return false
     }
 }
