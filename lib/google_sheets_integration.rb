@@ -125,7 +125,7 @@ module GoogleSheetsIntegration
 
         # Parse subscribable field: check mark or '1' = 1, 'x' or blank = 0
         subscribable_value = subscribable_col ? (row[subscribable_col]&.strip || '') : ''
-        subscribable = (subscribable_value.downcase.include?('✓') || subscribable_value.downcase.include?('check') || subscribable_value == '1') ? 1 : 0
+        subscribable = subscribable_value.downcase.include?('✓') || subscribable_value.downcase.include?('check') || subscribable_value == '1' ? 1 : 0
 
         item_data = {
           purchased: purchased_col ? (row[purchased_col]&.strip || '') : '',
@@ -143,24 +143,24 @@ module GoogleSheetsIntegration
         if in_shopping_section
           # Shopping list has different structure - extract price from column C (index 2)
           shopping_item = item_data.dup
-          shopping_item[:price] = row[2]&.strip || ''  # Column C is price in shopping list
-          
+          shopping_item[:price] = row[2]&.strip || '' # Column C is price in shopping list
+
           # Parse purchased field to extract quantity and normalize format
           purchased_text = shopping_item[:purchased] || ''
           if purchased_text.include?('✅')
             # Extract quantity from ✅1, ✅2, etc.
             quantity_match = purchased_text.match(/✅(\d+)/)
             shopping_item[:purchased_quantity] = quantity_match ? quantity_match[1].to_i : 1
-            shopping_item[:purchased] = 'purchased'  # Store as simple flag
+            shopping_item[:purchased] = 'purchased' # Store as simple flag
           elsif purchased_text.include?('✓')
-            shopping_item[:purchased_quantity] = 1  # Default quantity for simple checkmark
-            shopping_item[:purchased] = 'purchased'  # Store as simple flag
+            shopping_item[:purchased_quantity] = 1 # Default quantity for simple checkmark
+            shopping_item[:purchased] = 'purchased' # Store as simple flag
           else
             shopping_item[:purchased_quantity] = 0
-            shopping_item[:purchased] = ''  # Not purchased
+            shopping_item[:purchased] = '' # Not purchased
           end
-          
-          puts "🔍 DEBUG: Loaded shopping item '#{shopping_item[:item]}' with price '#{shopping_item[:price]}', purchased: #{shopping_item[:purchased]}, qty: #{shopping_item[:purchased_quantity]}"
+
+          #          puts "🔍 DEBUG: Loaded shopping item '#{shopping_item[:item]}' with price '#{shopping_item[:price]}', purchased: #{shopping_item[:purchased]}, qty: #{shopping_item[:purchased_quantity]}"
           shopping_list << shopping_item
         else
           product_list << item_data
@@ -353,7 +353,8 @@ module GoogleSheetsIntegration
       all_rows = []
 
       # 1. Headers
-      headers = ['Purchased', 'Item Name', 'Modifier', 'Priority', 'Qty', 'Last Purchased', 'ItemNo', 'URL', 'Subscribable']
+      headers = ['Purchased', 'Item Name', 'Modifier', 'Priority', 'Qty', 'Last Purchased', 'ItemNo', 'URL',
+                 'Subscribable']
       all_rows << headers
 
       # 2. Product list section
@@ -381,43 +382,43 @@ module GoogleSheetsIntegration
       all_rows << ['Shopping List', '', '', '', '', '', '', '', '']
 
       # 5. Shopping list items (simple format)
-      shopping_list_start_row = all_rows.length + 1  # Track where shopping list starts for formula
+      shopping_list_start_row = all_rows.length + 1 # Track where shopping list starts for formula
       puts "🔍 DEBUG: Shopping list will start at row #{shopping_list_start_row} (1-indexed)"
-      
+
       shopping_list_data.each_with_index do |shopping_item, index|
         puts "🔍 DEBUG: Item #{index + 1}: #{shopping_item[:item]} - price: '#{shopping_item[:price]}' (#{shopping_item[:price].class}), purchased: '#{shopping_item[:purchased]}', qty: #{shopping_item[:purchased_quantity]}"
-        
-        # Format purchased display consistently 
+
+        # Format purchased display consistently
         if shopping_item[:purchased] == 'purchased' && shopping_item[:purchased_quantity] && shopping_item[:purchased_quantity] > 0
           purchased_display = "✅#{shopping_item[:purchased_quantity]}"
         else
           purchased_display = '❌'
         end
-        
+
         # Put actual numeric price in price column (or empty if no price)
         if shopping_item[:price] && !shopping_item[:price].to_s.strip.empty?
           # Strip $ and other currency formatting, then convert to float
           price_string = shopping_item[:price].to_s.gsub(/[$,\s]/, '')
           price_value = price_string.to_f
           if price_value > 0
-            puts "🔍 DEBUG: Using numeric price: #{price_value} (from '#{shopping_item[:price]}')"
+          #            puts "🔍 DEBUG: Using numeric price: #{price_value} (from '#{shopping_item[:price]}')"
           else
             price_value = ''
             puts "🔍 DEBUG: Invalid price format '#{shopping_item[:price]}' - using empty cell"
           end
         else
-          price_value = ''  # Empty cell for items without prices
-          puts "🔍 DEBUG: No price - using empty cell"
+          price_value = '' # Empty cell for items without prices
+          puts '🔍 DEBUG: No price - using empty cell'
         end
-        
+
         item_number = shopping_item[:itemno] || ''
-        
+
         # Shopping list format: purchased_display | description | price_value | itemid
         row = [purchased_display, shopping_item[:item], price_value, item_number]
 
         all_rows << row
       end
-      
+
       # 6. Add TOTAL row with SUM formula
       shopping_list_end_row = all_rows.length
       # Formula sums column C (price column) from shopping list start to end
@@ -443,24 +444,24 @@ module GoogleSheetsIntegration
             SHEET_ID,
             write_range,
             value_range,
-            value_input_option: 'USER_ENTERED'  # This allows formulas to be interpreted
+            value_input_option: 'USER_ENTERED' # This allows formulas to be interpreted
           )
 
           # Format price column as currency and make TOTAL row bold
-          total_row_index = all_rows.length  # Last row (1-indexed)
-          
+          total_row_index = all_rows.length # Last row (1-indexed)
+
           # Format price column (column C, index 2) as currency
           # shopping_list_start_row + 1 because we need to skip the "Shopping List" delimiter row
-          price_format_start = shopping_list_start_row  # This should be the first actual shopping item
+          price_format_start = shopping_list_start_row # This should be the first actual shopping item
           puts "🔍 DEBUG: Formatting currency from row #{price_format_start} to #{total_row_index}"
-          
+
           price_column_format = {
             repeat_cell: {
               range: {
-                sheet_id: 0,  # Assuming first sheet
-                start_row_index: price_format_start - 1,  # Convert to 0-indexed (subtract 1)
-                end_row_index: total_row_index,  # Include TOTAL row
-                start_column_index: 2,  # Column C (price column)
+                sheet_id: 0, # Assuming first sheet
+                start_row_index: price_format_start - 1, # Convert to 0-indexed (subtract 1)
+                end_row_index: total_row_index, # Include TOTAL row
+                start_column_index: 2, # Column C (price column)
                 end_column_index: 3
               },
               cell: {
@@ -474,12 +475,12 @@ module GoogleSheetsIntegration
               fields: 'userEnteredFormat.numberFormat'
             }
           }
-          
+
           bold_request = {
             repeat_cell: {
               range: {
-                sheet_id: 0,  # Assuming first sheet
-                start_row_index: total_row_index - 1,  # Convert to 0-indexed
+                sheet_id: 0, # Assuming first sheet
+                start_row_index: total_row_index - 1, # Convert to 0-indexed
                 end_row_index: total_row_index,
                 start_column_index: 0,
                 end_column_index: 9

@@ -446,7 +446,16 @@ class WalmartGroceryAssistant
   def search_for_new_item(item_name)
     response = @ahk.search_walmart(item_name)
     puts "🔍 Search completed with response: #{response.inspect}"
-    # The search command now waits for completion before returning
+    
+    # Handle lookup_request response if user immediately lands on a product page
+    if response[:type] == 'lookup_request'
+      puts "🔍 Search landed on product page - processing lookup request"
+      url = response[:url]
+      if url
+        @logger.debug("Processing immediate lookup for URL: #{url}")
+        @ahk.lookup_item_by_url(url, @db)
+      end
+    end
   end
 
   def wait_for_item_completion(item_name)
@@ -587,8 +596,8 @@ class WalmartGroceryAssistant
       end
 
       # Record purchase if price provided
-      if price && price > 0 && db_item
-        price_cents = (price * 100).to_i
+      if price && price.to_f > 0 && db_item
+        price_cents = (price.to_f * 100).to_i
         @db.record_purchase(
           prod_id: db_item[:prod_id],
           quantity: purchase_quantity,
@@ -862,9 +871,9 @@ class WalmartGroceryAssistant
       end
 
       # Record purchase if price is provided
-      if price && price > 0
+      if price && price.to_f > 0
         begin
-          price_cents = (price * 100).to_i
+          price_cents = (price.to_f * 100).to_i
           record_purchase(item_for_purchase, price_cents: price_cents, quantity: purchase_quantity)
           puts "✅ Recorded purchase: #{purchase_quantity}x #{item_for_purchase[:description]} @ $#{price}"
 
@@ -913,8 +922,8 @@ class WalmartGroceryAssistant
       puts "✅ New item added: #{description}"
 
       # Record purchase if price is provided
-      if price && price > 0
-        price_cents = (price * 100).to_i
+      if price && price.to_f > 0
+        price_cents = (price.to_f * 100).to_i
 
         new_item = {
           prod_id: prod_id,
