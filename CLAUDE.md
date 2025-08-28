@@ -289,6 +289,64 @@ Automatic price detection feature has been successfully implemented and is now f
 
 The system provides seamless price detection that works across all items in the shopping list, significantly reducing manual data entry while maintaining full user control.
 
+### Search Command Response Flow Fix - COMPLETED ✅
+
+Fixed search command to properly wait for response instead of fire-and-forget behavior during shopping list processing:
+
+- **Issue**: When shopping list items needed searching, Ruby would send search command and immediately move to next item
+- **Root Cause**: `search_walmart` method in `ahk_bridge.rb` didn't call `read_response()` to wait for completion
+- **Solution**: Modified `search_walmart` to call `read_response()` and wait for AHK completion before returning
+- **Added Lookup Handling**: Updated `wait_for_item_completion` to handle intermediate `lookup_request` responses when Ctrl+Shift+A is pressed
+- **Result**: Search commands now follow same sequential wait-for-response pattern as direct URL navigation
+
+**Fixed Flow:**
+1. Ruby sends search string → AHK navigates to search URL
+2. Ruby waits for response (AHK signals search page loaded) 
+3. Ruby continues to `wait_for_item_completion()`
+4. User presses Ctrl+Shift+A → AHK sends `lookup_request`
+5. Ruby processes lookup and responds to AHK with existing item data
+6. AHK shows pre-filled dialog → User submits → AHK sends `add_and_purchase`
+7. Ruby processes completion and moves to next shopping list item
+
+### Total Price Calculation System - COMPLETED ✅
+
+Completely redesigned total calculation system for reliability and simplicity:
+
+- **Replaced Complex Ruby Logic**: Removed complex price calculation code that tried to handle multiple data sources
+- **Sheet-Based SUM Formula**: Added `=SUM(C{start}:C{end})` formula in TOTAL row for automatic calculation
+- **Currency Formatting**: Price column (column C) formatted as currency with `"$"#,##0.00` pattern
+- **Numeric Values**: Shopping list items now store actual numeric price values (floats) in price column
+- **Formula Input**: Changed `value_input_option` from `'RAW'` to `'USER_ENTERED'` so formulas are interpreted
+- **Price Field Standardization**: All shopping list items use single `price` field containing total price (unit_price × quantity)
+- **Currency Parsing**: System strips `$`, commas, and whitespace from existing sheet prices before converting to numeric
+- **Automatic Updates**: Total updates in real-time if prices are manually edited in the sheet
+
+**Price Data Flow:**
+1. **Sheet Loading**: Extracts prices from column C, strips currency formatting, stores as numeric `price` field
+2. **Purchase Recording**: Calculates total price (unit_price × quantity) and stores in `price` field
+3. **Sheet Writing**: Writes numeric values to column C
+4. **Formula Calculation**: SUM formula automatically totals all values in column C
+5. **Display**: Currency formatting makes everything display as proper dollar amounts
+
+### Consistent Purchase Display Format - COMPLETED ✅
+
+Unified purchased field handling for consistent `✅{quantity}` format across all items:
+
+- **Issue**: Mixed display formats with some items showing `✓` and others showing `✅1`, `✅2`, etc.
+- **Root Cause**: Inconsistent handling between existing sheet items and new purchases
+- **Solution**: Implemented separate storage for purchase status and quantity
+
+**Data Storage Changes:**
+- **Sheet Loading**: Parses existing `✅1`, `✅2`, `✓` formats and extracts quantity into separate `purchased_quantity` field
+- **Purchase Recording**: Stores `purchased: 'purchased'` flag + `purchased_quantity: qty` instead of formatted string
+- **Sheet Writing**: Formats all purchased items consistently as `✅{quantity}` using stored quantity value
+
+**Consistent Display:**
+- All purchased items now display as `✅1`, `✅2`, etc. (never plain `✓`)
+- Quantity extracted from existing sheet formats preserved
+- New purchases stored with proper quantity information
+- No more mixed formatting inconsistencies
+
 ### Unified JSON Communication System - COMPLETED ✅
 
 The Ruby-AHK communication architecture has been simplified and unified to use a single JSON-based channel:

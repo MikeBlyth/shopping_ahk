@@ -444,8 +444,9 @@ class WalmartGroceryAssistant
   end
 
   def search_for_new_item(item_name)
-    @ahk.search_walmart(item_name)
-    sleep(2)
+    response = @ahk.search_walmart(item_name)
+    puts "🔍 Search completed with response: #{response.inspect}"
+    # The search command now waits for completion before returning
   end
 
   def wait_for_item_completion(item_name)
@@ -478,6 +479,16 @@ class WalmartGroceryAssistant
         else
           @logger.debug("Ignoring status response: #{response.inspect}")
         end
+      when 'lookup_request'
+        @logger.debug("Lookup request received during wait, processing...")
+        url = response[:url]
+        if url
+          @logger.debug("Lookup URL: #{url}")
+          @ahk.lookup_item_by_url(url, @db)
+        else
+          @logger.warn('Lookup request received without a URL.')
+        end
+        # Continue waiting for the actual completion response
       when 'add_and_purchase'
         @logger.debug("add_and_purchase response received, handling completion.")
         handle_shopping_list_completion(item_name, response)
@@ -512,8 +523,7 @@ class WalmartGroceryAssistant
       update_shopping_list_item(original_item_name,
                                 purchased: '❌', # Red X for skipped items
                                 itemno: '',
-                                price_paid: 0.0,
-                                quantity_purchased: 0)
+                                price: 0.0)
       puts "⏭️ Shopping list item '#{original_item_name}' marked as skipped"
       return
     end
@@ -588,11 +598,12 @@ class WalmartGroceryAssistant
       end
 
       # Most importantly: Update the ORIGINAL shopping list item as purchased
+      total_price = price.to_f * purchase_quantity.to_i
       update_shopping_list_item(original_item_name,
-                                purchased: '✓',
+                                purchased: 'purchased',
+                                purchased_quantity: purchase_quantity.to_i,
                                 itemno: db_item ? db_item[:prod_id] : '',
-                                price_paid: price.to_f,
-                                quantity_purchased: purchase_quantity.to_i)
+                                price: total_price)
       puts "✅ Updated shopping list item '#{original_item_name}' as purchased"
 
     else
@@ -858,11 +869,11 @@ class WalmartGroceryAssistant
           puts "✅ Recorded purchase: #{purchase_quantity}x #{item_for_purchase[:description]} @ $#{price}"
 
           # Add to shopping list data for sync display
+          total_price = price * purchase_quantity
           update_shopping_list_item(item_for_purchase[:description], {
                                       purchased: '✓',
                                       itemno: item_for_purchase[:prod_id],
-                                      price_paid: price,
-                                      quantity_purchased: purchase_quantity,
+                                      price: total_price,
                                       url: item_for_purchase[:url] || url
                                     })
         rescue StandardError => e
@@ -915,11 +926,11 @@ class WalmartGroceryAssistant
         puts "✅ Recorded purchase: #{purchase_quantity}x #{description} @ $#{price}"
 
         # Add to shopping list data for sync display
+        total_price = price * purchase_quantity
         update_shopping_list_item(description, {
                                     purchased: '✓',
                                     itemno: prod_id,
-                                    price_paid: price,
-                                    quantity_purchased: purchase_quantity,
+                                    price: total_price,
                                     modifier: modifier,
                                     url: url
                                   })
@@ -975,12 +986,13 @@ class WalmartGroceryAssistant
     # Process purchase response
     case parsed_response[:type]
     when 'purchase'
-      # Mark as purchased and update shopping list with itemid, quantity, and price
+      # Mark as purchased and update shopping list with itemid and total price
+      total_price = parsed_response[:price].to_f * parsed_response[:quantity].to_i
       update_shopping_list_item(item_name,
-                                purchased: '✓',
+                                purchased: 'purchased',
+                                purchased_quantity: parsed_response[:quantity].to_i,
                                 itemno: db_item[:prod_id],
-                                price_paid: parsed_response[:price].to_f,
-                                quantity_purchased: parsed_response[:quantity].to_i)
+                                price: total_price)
 
       # Record purchase in database  
       if db_item[:prod_id]
@@ -1016,8 +1028,7 @@ class WalmartGroceryAssistant
         update_shopping_list_item(item_name,
                                   purchased: '❌',
                                   itemno: db_item[:prod_id],
-                                  price_paid: 0.0,
-                                  quantity_purchased: 0)
+                                  price: 0.0)
         puts "⏭️ Item '#{item_name}' marked as skipped"
       end
     end
@@ -1064,19 +1075,21 @@ class WalmartGroceryAssistant
     # Update shopping list item immediately with purchase info
     case parsed_response[:type]
     when 'purchase_new'
-      # Mark as purchased and update shopping list with itemid, quantity, and price
+      # Mark as purchased and update shopping list with itemid and total price
+      total_price = parsed_response[:price].to_f * parsed_response[:quantity].to_i
       update_shopping_list_item(original_shopping_item_name,
-                                purchased: '✓',
+                                purchased: 'purchased',
+                                purchased_quantity: parsed_response[:quantity].to_i,
                                 itemno: db_item ? db_item[:prod_id] : '',
-                                price_paid: parsed_response[:price].to_f,
-                                quantity_purchased: parsed_response[:quantity].to_i)
+                                price: total_price)
     when 'purchase'
-      # Mark as purchased and update shopping list with itemid, quantity, and price
+      # Mark as purchased and update shopping list with itemid and total price
+      total_price = parsed_response[:price].to_f * parsed_response[:quantity].to_i
       update_shopping_list_item(original_shopping_item_name,
-                                purchased: '✓',
+                                purchased: 'purchased',
+                                purchased_quantity: parsed_response[:quantity].to_i,
                                 itemno: db_item ? db_item[:prod_id] : '',
-                                price_paid: parsed_response[:price].to_f,
-                                quantity_purchased: parsed_response[:quantity].to_i)
+                                price: total_price)
 
       # Still record in database
       if db_item && db_item[:prod_id]
@@ -1148,8 +1161,7 @@ class WalmartGroceryAssistant
         update_shopping_list_item(original_shopping_item_name,
                                   purchased: '❌', # Red X for skipped items
                                   itemno: db_item ? db_item[:prod_id] : '',
-                                  price_paid: 0.0,
-                                  quantity_purchased: 0)
+                                  price: 0.0)
         puts "⏭️ Item '#{original_shopping_item_name}' marked as skipped"
       end
 
@@ -1212,11 +1224,11 @@ class WalmartGroceryAssistant
     completion_name = shopping_list_name || item[:description]
     price_paid = price_cents ? (price_cents / 100.0) : nil
 
+    total_price = price_paid ? price_paid * quantity : 0.0
     update_shopping_list_item(completion_name,
                               purchased: '✓',
                               itemno: item[:prod_id],
-                              price_paid: price_paid,
-                              quantity_purchased: quantity)
+                              price: total_price)
 
     if price_cents
       price_display = "$#{format('%.2f', price_cents / 100.0)}"
@@ -1253,7 +1265,9 @@ class WalmartGroceryAssistant
         quantity: 1,
         last_purchased: '',
         itemno: '',
-        url: ''
+        url: '',
+        price: '',
+        purchased_quantity: 0
       }
 
       # Apply updates to the new item

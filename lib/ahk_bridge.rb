@@ -33,6 +33,9 @@ class AhkBridge
   def search_walmart(search_term)
     puts "🔍 Searching Walmart via AHK: #{search_term}".colorize(:blue)
     send_command("SEARCH|#{search_term}", timeout: 30)  # 30 second timeout for search
+    response = read_response
+    puts "🔍 SEARCH response: '#{response}'".colorize(:blue)
+    response
   end
 
   def get_current_url
