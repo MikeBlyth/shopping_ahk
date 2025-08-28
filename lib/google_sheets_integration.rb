@@ -117,15 +117,15 @@ module GoogleSheetsIntegration
         end
 
         # Skip rows without item names
-        item_name = item_col ? (row[item_col]&.strip || '') : ''
+        item_name = item_col ? (row[item_col]&.strip&.gsub(/[[:punct:]\s]+$/, '') || '') : ''
         next if item_name.empty?
 
         # Skip TOTAL
         next if item_name.include?('TOTAL')
 
-        # Parse subscribable field: check mark or '1' = true, 'x' or blank = false
+        # Parse subscribable field: check mark or '1' = 1, 'x' or blank = 0
         subscribable_value = subscribable_col ? (row[subscribable_col]&.strip || '') : ''
-        subscribable = subscribable_value.downcase.include?('✓') || subscribable_value.downcase.include?('check') || subscribable_value == '1'
+        subscribable = (subscribable_value.downcase.include?('✓') || subscribable_value.downcase.include?('check') || subscribable_value == '1') ? 1 : 0
 
         item_data = {
           purchased: purchased_col ? (row[purchased_col]&.strip || '') : '',
@@ -345,9 +345,9 @@ module GoogleSheetsIntegration
         # Build row with fixed column order: Purchased, Item Name, Modifier, Priority, Qty, Last Purchased, ItemNo, URL, Subscribable
         # Leave priority blank if it's 1 (highest priority default)
         # Leave quantity blank in product list (not used for ordering)
-        # Display subscribable as green check for true, blank for false
+        # Display subscribable as green check for 1, blank for 0
         priority_display = db_item[:priority] == 1 ? '' : db_item[:priority].to_s
-        subscribable_display = db_item[:subscribable] ? '✅' : ''
+        subscribable_display = db_item[:subscribable] == 1 ? '✅' : ''
         row = ['', db_item[:description], db_item[:modifier] || '', priority_display, '', last_purchased,
                db_item[:prod_id], db_item[:url], subscribable_display]
 

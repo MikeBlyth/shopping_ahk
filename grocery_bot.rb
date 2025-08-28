@@ -451,14 +451,21 @@ class WalmartGroceryAssistant
   def wait_for_item_completion(item_name)
     # Wait for user to press Ctrl+Shift+A to complete the item
     puts '   ⏳ Waiting for item completion via Ctrl+Shift+A...'
+    @logger.debug("Entering wait_for_item_completion for item: #{item_name}")
 
     loop do
       sleep(1)
+      @logger.debug("Checking for response file...")
 
       # Check for response file instead of status
-      next unless File.exist?(@ahk.class::RESPONSE_FILE)
+      unless File.exist?(@ahk.class::RESPONSE_FILE)
+        @logger.debug("Response file not found.")
+        next
+      end
 
+      @logger.debug("Response file found!")
       response = @ahk.read_response
+      @logger.debug("Response from AHK: #{response.inspect}")
       next if response.nil? || response.empty?
 
       case response[:type]
@@ -466,21 +473,29 @@ class WalmartGroceryAssistant
         case response[:value]
         when 'quit', 'shutdown'
           puts '   🛑 User requested shutdown during wait'
+          @logger.debug("Shutdown requested, breaking loop.")
           break
+        else
+          @logger.debug("Ignoring status response: #{response.inspect}")
         end
       when 'add_and_purchase'
+        @logger.debug("add_and_purchase response received, handling completion.")
         handle_shopping_list_completion(item_name, response)
         puts "   ✅ Item '#{item_name}' completed"
         break
       else
         # Handle other response types that might complete the item
         if response[:type] != 'status'
+          @logger.debug("Other response received, handling completion.")
           handle_shopping_list_completion(item_name, response)
           puts "   ✅ Item '#{item_name}' completed"
           break
+        else
+          @logger.debug("Ignoring status response: #{response.inspect}")
         end
       end
     end
+    @logger.debug("Exiting wait_for_item_completion for item: #{item_name}")
   end
 
   def handle_shopping_list_completion(original_item_name, response_data)
@@ -512,9 +527,8 @@ class WalmartGroceryAssistant
       modifier = parsed_response[:modifier]
       priority = parsed_response[:priority] || 1
       default_quantity = parsed_response[:default_quantity] || 1
-      # Convert AHK integer (1/0) to proper boolean
-      subscribable_raw = parsed_response[:subscribable] || false
-      subscribable = [1, true].include?(subscribable_raw)
+      # Keep subscribable as integer (0/1) for consistency
+      subscribable = (parsed_response[:subscribable] || 0).to_i
       url = parsed_response[:url]
       price = parsed_response[:price]
       purchase_quantity = parsed_response[:purchase_quantity] || 1
@@ -537,7 +551,7 @@ class WalmartGroceryAssistant
               updates[:default_quantity] =
                 default_quantity
             end
-            updates[:subscribable] = subscribable if subscribable != existing_item[:subscribable]
+            updates[:subscribable] = subscribable if subscribable != (existing_item[:subscribable] || 0)
 
             if updates.any?
               @db.update_item(prod_id, updates)
@@ -779,9 +793,8 @@ class WalmartGroceryAssistant
     modifier = parsed_response[:modifier]&.strip || ''
     priority = parsed_response[:priority] || 1
     default_quantity = parsed_response[:default_quantity] || 1
-    # Convert AHK integer (1/0) to proper boolean
-    subscribable_raw = parsed_response[:subscribable] || false
-    subscribable = [1, true].include?(subscribable_raw)
+    # Keep subscribable as integer (0/1) for consistency
+    subscribable = (parsed_response[:subscribable] || 0).to_i
     url = parsed_response[:url]&.strip || ''
     price = parsed_response[:price]
     purchase_quantity = parsed_response[:purchase_quantity] || 1
@@ -823,7 +836,7 @@ class WalmartGroceryAssistant
             updates[:default_quantity] =
               default_quantity
           end
-          updates[:subscribable] = subscribable if subscribable != existing_item[:subscribable]
+          updates[:subscribable] = subscribable if subscribable != (existing_item[:subscribable] || 0)
 
           if updates.any?
             @db.update_item(prod_id, updates)
@@ -973,10 +986,10 @@ class WalmartGroceryAssistant
       if db_item[:prod_id]
         # Update subscribable field if provided and different
         unless parsed_response[:subscribable].nil?
-          subscribable_bool = [1, true].include?(parsed_response[:subscribable])
-          if subscribable_bool != db_item[:subscribable]
-            @db.update_item(db_item[:prod_id], { subscribable: subscribable_bool })
-            puts "📦 Updated subscribable status: #{db_item[:description]} → #{subscribable_bool ? 'Yes' : 'No'}"
+          subscribable_int = (parsed_response[:subscribable] || 0).to_i
+          if subscribable_int != (db_item[:subscribable] || 0)
+            @db.update_item(db_item[:prod_id], { subscribable: subscribable_int })
+            puts "📦 Updated subscribable status: #{db_item[:description]} → #{subscribable_int == 1 ? 'Yes' : 'No'}"
           end
         end
 
@@ -1069,11 +1082,10 @@ class WalmartGroceryAssistant
       if db_item && db_item[:prod_id]
         # Update subscribable field if provided and different
         unless parsed_response[:subscribable].nil?
-          # Convert AHK integer (1/0) to proper boolean
-          subscribable_bool = [1, true].include?(parsed_response[:subscribable])
-          if subscribable_bool != db_item[:subscribable]
-            @db.update_item(db_item[:prod_id], { subscribable: subscribable_bool })
-            puts "📦 Updated subscribable status: #{db_item[:description]} → #{subscribable_bool ? 'Yes' : 'No'}"
+          subscribable_int = (parsed_response[:subscribable] || 0).to_i
+          if subscribable_int != (db_item[:subscribable] || 0)
+            @db.update_item(db_item[:prod_id], { subscribable: subscribable_int })
+            puts "📦 Updated subscribable status: #{db_item[:description]} → #{subscribable_int == 1 ? 'Yes' : 'No'}"
           end
         end
 
@@ -1097,7 +1109,7 @@ class WalmartGroceryAssistant
 
         if prod_id
           # Create the new item without recording a purchase
-          subscribable = parsed_response[:subscribable] || false
+          subscribable = (parsed_response[:subscribable] || 0).to_i
           @db.create_item(
             prod_id: prod_id,
             url: captured_url,

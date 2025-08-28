@@ -127,7 +127,7 @@ class AhkBridge
         modifier: item[:modifier] || '',
         priority: item[:priority] || 1,
         default_quantity: item[:default_quantity] || 1,
-        subscribable: item[:subscribable] || false
+        subscribable: item[:subscribable] || 0
       }
       puts "✅ Found existing item: #{item[:description]}".colorize(:green)
     else

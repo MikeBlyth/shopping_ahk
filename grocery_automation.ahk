@@ -343,7 +343,7 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     
     ; Subscribable checkbox (auto-detect and set)
     purchaseGui.Add("Text", "xm y+10", "Subscribable (auto-detected):")
-    subscribableCheckbox := purchaseGui.Add("Checkbox", "xm y+5 w200 h20", "Subscripable")
+    subscribableCheckbox := purchaseGui.Add("Checkbox", "xm y+5 w200 h20", "Subscribable")
     
     ; Auto-detect subscribable status and set checkbox
     isSubscribable := DetectSubscribable()
@@ -375,8 +375,9 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     global CurrentAddItemDialog := ""
     global CurrentDialogControls := ""
     
-    ; Show dialog immediately
-    purchaseGui.Show()
+    ; Show dialog immediately (positioned 400px left of center)
+    dialogX := (A_ScreenWidth / 2) - 400 - 200  ; Center minus 400px minus half dialog width
+    purchaseGui.Show("x" . dialogX)
     
     ; Start purchase detection after dialog is shown
     SetTimer(() => StartPurchaseDetection(), -100)  ; Run once after 100ms delay
@@ -420,13 +421,13 @@ PurchaseClickHandler(gui) {
             response_obj["type"] := "purchase_new"
             response_obj["price"] := Float(price)
             response_obj["quantity"] := Integer(quantity)
-            response_obj["subscribable"] := subscribable ? true : false
+            response_obj["subscribable"] := subscribable ? 1 : 0
             response_obj["url"] := current_url
         } else {
             response_obj["type"] := "purchase"
             response_obj["price"] := Float(price)
             response_obj["quantity"] := Integer(quantity)
-            response_obj["subscribable"] := subscribable ? true : false
+            response_obj["subscribable"] := subscribable ? 1 : 0
         }
         WriteResponseJSON(response_obj)
     }
@@ -773,8 +774,9 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     ; Add cleanup handler when dialog is closed
     addItemGui.OnEvent("Close", (*) => CleanupDialogReferences())
     
-    ; Show dialog immediately
-    addItemGui.Show()
+    ; Show dialog immediately (positioned 400px left of center)
+    dialogX := (A_ScreenWidth / 2) - 400 - 250  ; Center minus 400px minus half dialog width
+    addItemGui.Show("x" . dialogX)
     
     ; Start purchase detection after dialog is shown
     SetTimer(() => StartPurchaseDetection(), -100)  ; Run once after 100ms delay
@@ -845,7 +847,7 @@ AddAndPurchaseClickHandler(gui) {
     response_obj["modifier"] := modifier
     response_obj["priority"] := Integer(priority)
     response_obj["default_quantity"] := Integer(defaultQuantity)
-    response_obj["subscribable"] := subscribable ? true : false
+    response_obj["subscribable"] := subscribable ? 1 : 0
     response_obj["url"] := currentUrl
     response_obj["price"] := price != "" ? Float(price) : ""
     response_obj["purchase_quantity"] := Integer(purchaseQuantity)
@@ -906,7 +908,7 @@ AddOnlyClickHandler(gui) {
     response_obj["modifier"] := modifier
     response_obj["priority"] := Integer(priority)
     response_obj["default_quantity"] := Integer(defaultQuantity)
-    response_obj["subscribable"] := subscribable ? true : false
+    response_obj["subscribable"] := subscribable ? 1 : 0
     response_obj["url"] := currentUrl
     response_obj["price"] := "" ; Empty price indicates "add only"
     response_obj["purchase_quantity"] := 0
