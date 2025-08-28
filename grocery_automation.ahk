@@ -193,13 +193,16 @@ OpenURL(url) {
     ; Go to address bar and navigate
     WinActivate(TargetWindowHandle)
     WinWaitActive(TargetWindowHandle)
+    WriteDebug("DEBUG: OpenURL called for: " . url)
     PasteURL(url)
     
     ; Return immediately - don't wait for page loading
+    WriteDebug("DEBUG: OpenURL sending ready status")
     SendStatus("ready")
 }
 
 PasteURL(url) {
+    WriteDebug("DEBUG: PasteURL called for: " . url)
     ; Paste URL into address bar without navigating
     Send("^l")  ; Ctrl+L to focus address bar
     Sleep(100)
@@ -216,6 +219,7 @@ PasteURL(url) {
     Sleep 50
     A_Clipboard := currentClipboard
     Sleep(100)
+    WriteDebug("DEBUG: PasteURL completed, no status sent")
 }
 
 SearchWalmart(searchTerm) {
@@ -307,8 +311,8 @@ NavigateAndShowDialog(param) {
     WinWaitActive(TargetWindowHandle)
     PasteURL(url)
     
-    ; Show dialog immediately while page loads
-    FileAppend("NavigateAndShowDialog: Showing dialog for " . item_name . "`n", "command_debug.txt")
+    ; Show dialog immediately while page loads (no lookup needed for known items)
+    FileAppend("NavigateAndShowDialog: Showing dialog for " . item_name . " (known=" . is_known . ")`n", "command_debug.txt")
     ShowPurchaseDialog(item_name, is_known, item_description, default_quantity)
 }
 
@@ -366,6 +370,10 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     global CurrentPurchaseButton := addButton
     global CurrentPriceEdit := priceEdit
     FileAppend("ShowPurchaseDialog: Set CurrentPriceEdit reference`n", "command_debug.txt")
+    
+    ; Clear any dialog references that might interfere with lookup
+    global CurrentAddItemDialog := ""
+    global CurrentDialogControls := ""
     
     ; Show dialog immediately
     purchaseGui.Show()
@@ -645,6 +653,7 @@ ResetForNextSession() {
 ; Shopping list processing complete
 ProcessSessionComplete() {
     FileAppend("ProcessSessionComplete called - setting completion tooltip`n", "command_debug.txt")
+    WriteDebug("DEBUG: ProcessSessionComplete sending ready status")
     ShowPersistentStatus("Shopping list complete! Press Ctrl+Shift+A to add items or Ctrl+Shift+Q to quit")
     ResetForNextSession()
     SendStatus("ready")
@@ -842,19 +851,7 @@ AddAndPurchaseClickHandler(gui) {
     response_obj["purchase_quantity"] := Integer(purchaseQuantity)
     
     WriteDebug("AddAndPurchaseClickHandler - writing JSON response")
-    
-    ; Use new centralized response function
-    responseData := Map()
-    responseData["description"] := description
-    responseData["modifier"] := modifier
-    responseData["priority"] := priority
-    responseData["default_quantity"] := defaultQuantity
-    responseData["subscribable"] := subscribable
-    responseData["url"] := currentUrl
-    responseData["price"] := price != "" ? Float(price) : ""
-    responseData["purchase_quantity"] := Integer(purchaseQuantity)
-    
-    WriteResponseJSON(responseData)
+    WriteResponseJSON(response_obj)
     StopPriceDetection()
     gui.Destroy()
     
@@ -1040,8 +1037,10 @@ StartPurchaseDetection() {
         ButtonRegion := result.clickRegion
         ButtonFound := true
         FileAppend("Button found! Region set to: " . ButtonRegion.left . "," . ButtonRegion.top . " to " . ButtonRegion.right . "," . ButtonRegion.bottom . "`n", "command_debug.txt")
+        FileAppend("DETECTION STATE: ButtonFound=" . ButtonFound . ", CurrentPurchaseButton=" . (CurrentPurchaseButton ? "SET" : "NOT SET") . "`n", "command_debug.txt")
     } else {
         FileAppend("Button NOT found`n", "command_debug.txt")
+        FileAppend("DETECTION STATE: ButtonFound=false, CurrentPurchaseButton=" . (CurrentPurchaseButton ? "SET" : "NOT SET") . "`n", "command_debug.txt")
     }
     ; If not found, ButtonFound stays false - user can click Override
 }
@@ -1054,14 +1053,22 @@ StartPurchaseDetection() {
     CoordMode("Mouse", "Screen")
     MouseGetPos(&mouseX, &mouseY)
     
-    ; Log all clicks when button detection is active
+    ; Debug: Always log clicks to see if hotkey is working
+    FileAppend("CLICK HOTKEY: Mouse click detected at " . mouseX . "," . mouseY . "`n", "command_debug.txt")
+    
+    ; Debug: Log all clicks when button detection is active
     if (ButtonFound && CurrentPurchaseButton) {
+        FileAppend("CLICK DEBUG: Mouse click at " . mouseX . "," . mouseY . " - ButtonFound=" . ButtonFound . "`n", "command_debug.txt")
+        FileAppend("CLICK DEBUG: Button region " . ButtonRegion.left . "," . ButtonRegion.top . " to " . ButtonRegion.right . "," . ButtonRegion.bottom . "`n", "command_debug.txt")
         
         ; Check if click is in Add to Cart button region
         inRegion := (mouseX >= ButtonRegion.left && mouseX <= ButtonRegion.right && 
                      mouseY >= ButtonRegion.top && mouseY <= ButtonRegion.bottom)
         
+        FileAppend("CLICK DEBUG: inRegion=" . inRegion . "`n", "command_debug.txt")
+        
         if (inRegion) {
+            FileAppend("CLICK DEBUG: Add to Cart click detected! Updating button state`n", "command_debug.txt")
             
             ; Change button state
             CurrentPurchaseButton.Text := "✅ Add & Purchase"
@@ -1081,7 +1088,13 @@ StartPurchaseDetection() {
             } else {
                 FileAppend("Skipping price detection - no dialog present`n", "command_debug.txt")
             }
-        } else {
+        }
+    } else {
+        ; Debug: Log when click detection is not active
+        if (!ButtonFound) {
+            FileAppend("CLICK DEBUG: Click ignored - ButtonFound=false`n", "command_debug.txt")
+        } else if (!CurrentPurchaseButton) {
+            FileAppend("CLICK DEBUG: Click ignored - CurrentPurchaseButton not set`n", "command_debug.txt")
         }
     }
 }
@@ -1256,6 +1269,7 @@ ProcessLookupResult(jsonParam) {
     ; Only process if we have an active dialog
     if (!CurrentAddItemDialog || !CurrentDialogControls) {
         WriteDebug("No active dialog to update - lookup result ignored")
+        WriteDebug("DEBUG: ProcessLookupResult sending ready status (no active dialog)")
         SendStatus("ready")  ; Send acknowledgment anyway
         return
     }
@@ -1264,21 +1278,21 @@ ProcessLookupResult(jsonParam) {
         ; Parse the JSON response
         lookupData := jsongo.Parse(jsonParam)
         
-        if (lookupData.found) {
+        if (lookupData["found"]) {
             WriteDebug("Updating dialog with found item data")
             WriteDebug("Current description field text: '" . CurrentDialogControls.descriptionEdit.Text . "'")
-            WriteDebug("Setting description to: '" . lookupData.description . "'")
+            WriteDebug("Setting description to: '" . lookupData["description"] . "'")
             
             ; Update dialog fields with lookup data
-            CurrentDialogControls.descriptionEdit.Text := lookupData.description
-            CurrentDialogControls.modifierEdit.Text := lookupData.modifier
-            CurrentDialogControls.priorityEdit.Text := lookupData.priority
-            CurrentDialogControls.defaultQuantityEdit.Text := lookupData.default_quantity
-            CurrentDialogControls.subscribableCheckbox.Value := lookupData.subscribable ? 1 : 0
-            CurrentDialogControls.quantityEdit.Text := lookupData.default_quantity
+            CurrentDialogControls.descriptionEdit.Text := lookupData["description"]
+            CurrentDialogControls.modifierEdit.Text := lookupData["modifier"]
+            CurrentDialogControls.priorityEdit.Text := lookupData["priority"]
+            CurrentDialogControls.defaultQuantityEdit.Text := lookupData["default_quantity"]
+            CurrentDialogControls.subscribableCheckbox.Value := lookupData["subscribable"] ? 1 : 0
+            CurrentDialogControls.quantityEdit.Text := lookupData["default_quantity"]
             
             WriteDebug("After update, description field text: '" . CurrentDialogControls.descriptionEdit.Text . "'")
-            WriteDebug("Dialog updated with: " . lookupData.description)
+            WriteDebug("Dialog updated with: " . lookupData["description"])
         } else {
             WriteDebug("Item not found - clearing placeholder text")
             ; Clear the "< Looking up... >" placeholder

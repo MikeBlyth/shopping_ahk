@@ -184,7 +184,10 @@ class AhkBridge
   end
 
   def read_response
-    return '' unless File.exist?(RESPONSE_FILE)
+    # Wait for response file to appear (no timeout - matches dialog design)
+    until File.exist?(RESPONSE_FILE)
+      sleep(0.1)
+    end
 
     response_text = File.read(RESPONSE_FILE).strip
     # Delete the response file immediately after reading to prevent stale data

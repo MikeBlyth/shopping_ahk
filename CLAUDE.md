@@ -203,6 +203,19 @@ The system now operates with just **two user hotkeys**:
 - **JSON Response Format**: Converted from pipe-delimited to proper JSON for reliable data communication
 - **Integration**: Works seamlessly with existing purchase dialogs without disrupting workflow
 
+### Ruby-AHK Communication Fix ✅
+- **Issue**: Ruby's `read_response` method returned empty immediately if response file didn't exist, causing premature session completion
+- **Root Cause**: Method used `return '' unless File.exist?(RESPONSE_FILE)` instead of waiting for response
+- **Solution**: Modified `read_response` to wait indefinitely for response file with `until File.exist?(RESPONSE_FILE); sleep(0.1); end`
+- **Benefit**: Restores proper dialog waiting behavior - Ruby now waits patiently for user to interact with dialogs
+- **Design Match**: Aligns with infinite dialog timeout design throughout the system
+
+### AutoHotkey v2 Map Syntax Fix ✅  
+- **Issue**: `ProcessLookupResult` function using v1 object syntax (`lookupData.found`) on v2 Map data
+- **Error**: "This value of type 'Map' has no property named 'found'" when processing JSON lookup results
+- **Solution**: Converted all property access to v2 Map syntax (`lookupData["found"]`, `lookupData["description"]`, etc.)
+- **Result**: Item lookup functionality now works correctly with AutoHotkey v2 Map objects
+
 
 
 ## Item Matching Rules

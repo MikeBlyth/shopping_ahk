@@ -73,7 +73,6 @@ class WalmartGroceryAssistant
 
       process_grocery_list(grocery_items)
 
-      @ahk.show_message("Shopping complete!\n\nReview your cart and proceed to checkout when ready.")
     end
 
     # Shopping list processing complete - signal session complete to show persistent tooltip
@@ -951,8 +950,66 @@ class WalmartGroceryAssistant
       default_quantity: db_item[:default_quantity] || 1
     )
 
-    # For now, just return the response - the caller will handle it the same way
-    parse_response(response)
+    # Process the response the same way as handle_user_interaction
+    parsed_response = parse_response(response)
+    
+    # Check for quit signal first
+    if parsed_response[:type] == 'status' && %w[quit shutdown].include?(parsed_response[:value])
+      puts '✅ User requested exit - terminating Ruby'
+      exit(0)
+    end
+
+    # Process purchase response
+    case parsed_response[:type]
+    when 'purchase'
+      # Mark as purchased and update shopping list with itemid, quantity, and price
+      update_shopping_list_item(item_name,
+                                purchased: '✓',
+                                itemno: db_item[:prod_id],
+                                price_paid: parsed_response[:price].to_f,
+                                quantity_purchased: parsed_response[:quantity].to_i)
+
+      # Record purchase in database  
+      if db_item[:prod_id]
+        # Update subscribable field if provided and different
+        unless parsed_response[:subscribable].nil?
+          subscribable_bool = [1, true].include?(parsed_response[:subscribable])
+          if subscribable_bool != db_item[:subscribable]
+            @db.update_item(db_item[:prod_id], { subscribable: subscribable_bool })
+            puts "📦 Updated subscribable status: #{db_item[:description]} → #{subscribable_bool ? 'Yes' : 'No'}"
+          end
+        end
+
+        price_cents = (parsed_response[:price] * 100).to_i
+        @db.record_purchase(
+          prod_id: db_item[:prod_id],
+          quantity: parsed_response[:quantity],
+          price_cents: price_cents
+        )
+        puts "✅ Recorded purchase in database: #{parsed_response[:quantity]}x #{db_item[:description]} @ $#{parsed_response[:price]}"
+      end
+      
+    when 'choice'
+      # Handle "Search Again" button (choice 999) like "search for new item" in multi-choice
+      if parsed_response[:value] == 999
+        puts "🔍 User requested search for alternatives: #{item_name}"
+        return :search_new_item
+      end
+      
+    when 'status'
+      # Handle status responses like 'skipped' from skip button
+      if parsed_response[:value] == 'skipped'
+        # User clicked "Skip Item" - mark with red X
+        update_shopping_list_item(item_name,
+                                  purchased: '❌',
+                                  itemno: db_item[:prod_id],
+                                  price_paid: 0.0,
+                                  quantity_purchased: 0)
+        puts "⏭️ Item '#{item_name}' marked as skipped"
+      end
+    end
+    
+    return parsed_response
   end
 
   def handle_user_interaction(item_name, db_item = nil)
