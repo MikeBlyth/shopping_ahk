@@ -187,7 +187,6 @@ class WalmartDatabase
       cmd_parts << db_config[:database]
       
       puts "Creating database backup: #{File.basename(backup_file)}"
-      puts "🔍 DEBUG: Running command parts: #{cmd_parts.join(' ')}"
       
       # Set environment variable in Ruby process
       old_pgpassword = ENV['PGPASSWORD']
@@ -204,16 +203,12 @@ class WalmartDatabase
         ENV.delete('PGPASSWORD')
       end
       
-      puts "🔍 DEBUG: Exit status: #{exit_status}"
-      puts "🔍 DEBUG: Output: #{output}" unless output.empty?
-      
       if exit_status == 0 && File.exist?(backup_file)
         puts "✅ Backup created successfully: #{backup_file}"
         cleanup_old_backups(backup_dir, max_backups)
         return backup_file
       else
-        puts "❌ Backup failed (exit code: #{exit_status})"
-        puts "❌ Error output: #{output}" unless output.empty?
+        puts "❌ Backup failed"
         return nil
       end
       
@@ -254,32 +249,6 @@ class WalmartDatabase
     end
   end
   
-  def build_pg_dump_command(config, backup_file)
-    cmd_parts = ['pg_dump']
-    cmd_parts << "--host=#{config[:host]}"
-    cmd_parts << "--port=#{config[:port]}"
-    cmd_parts << "--username=#{config[:user]}"
-    cmd_parts << "--no-password" # Use PGPASSWORD environment variable
-    cmd_parts << "--verbose"
-    cmd_parts << "--clean"
-    cmd_parts << "--if-exists"
-    cmd_parts << "--create"
-    cmd_parts << "--file=\"#{backup_file}\"" # Quote the file path
-    cmd_parts << config[:database]
-    
-    # For Windows, we need to set environment variable differently
-    if config[:password]
-      if RUBY_PLATFORM =~ /mswin|mingw|cygwin/
-        # Windows: use set command
-        "set PGPASSWORD=#{config[:password]} && #{cmd_parts.join(' ')}"
-      else
-        # Unix: use export
-        "PGPASSWORD=#{config[:password]} #{cmd_parts.join(' ')}"
-      end
-    else
-      cmd_parts.join(' ')
-    end
-  end
   
   def cleanup_old_backups(backup_dir, max_backups)
     return unless max_backups > 0

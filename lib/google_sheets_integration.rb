@@ -155,6 +155,9 @@ module GoogleSheetsIntegration
           elsif purchased_text.include?('✓')
             shopping_item[:purchased_quantity] = 1 # Default quantity for simple checkmark
             shopping_item[:purchased] = 'purchased' # Store as simple flag
+          elsif purchased_text.include?('❌')
+            shopping_item[:purchased_quantity] = 0
+            shopping_item[:purchased] = 'skipped' # Store as skipped flag
           else
             shopping_item[:purchased_quantity] = 0
             shopping_item[:purchased] = '' # Not purchased

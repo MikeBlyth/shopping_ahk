@@ -238,9 +238,10 @@ class WalmartGroceryAssistant
       puts "🔍 DEBUG: Setting @shopping_list_data to unique_shopping_items (#{unique_shopping_items.length} items)"
       @shopping_list_data = unique_shopping_items
 
-      # Process only items with quantity != 0 AND no purchase mark
+      # Process only items with quantity != 0 AND empty purchased field
       items_to_order = unique_shopping_items.select do |item|
-        item[:quantity] != 0 && (item[:purchased].nil? || item[:purchased].strip.empty?)
+        item[:quantity] != 0 && 
+        (item[:purchased].nil? || item[:purchased].strip.empty?)
       end
 
       # Return just the item names for processing
@@ -898,12 +899,7 @@ class WalmartGroceryAssistant
         end
       else
         puts '✅ Item processed without purchase (no price provided)'
-
-        # Add to shopping list data without purchase info
-        update_shopping_list_item(item_for_purchase[:description], {
-                                    itemno: item_for_purchase[:prod_id],
-                                    url: item_for_purchase[:url] || url
-                                  })
+        # Do NOT add to shopping list data - manual items without purchase shouldn't appear on list
       end
 
       return item_for_purchase
@@ -953,13 +949,7 @@ class WalmartGroceryAssistant
                                   })
       else
         puts '✅ Item added without purchase (no price provided)'
-
-        # Add to shopping list data without purchase info
-        update_shopping_list_item(description, {
-                                    itemno: prod_id,
-                                    modifier: modifier,
-                                    url: url
-                                  })
+        # Do NOT add to shopping list data - manual items without purchase shouldn't appear on list
       end
 
       {
@@ -1322,6 +1312,9 @@ class WalmartGroceryAssistant
           return # Exit the method
         when 'continue'
           @logger.info('End of shopping list message received. Waiting for user actions.')
+        when 'skipped'
+          puts '⏭️ Manual item addition skipped'
+          # Do nothing - don't add skipped manual items to shopping list
         end
       when 'lookup_request'
         @logger.info('Processing item lookup request...')
