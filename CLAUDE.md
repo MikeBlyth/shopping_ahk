@@ -364,3 +364,40 @@ The Ruby-AHK communication architecture has been simplified and unified to use a
 - **Consistent Parsing**: All responses parsed as JSON, eliminating mixed format handling
 - **Better Error Handling**: Unified error responses through JSON structure
 - **Maintainable Code**: Helper functions reduce duplication and ensure consistent formatting
+
+## Code Architecture Notes - MAINTENANCE GUIDANCE
+
+### Current System Complexity
+The purchase recording system has multiple paths and data formats that can be brittle:
+
+**Purchase Status Formats:**
+- `purchased: 'purchased'` - Used by shopping list completion
+- `purchased: '✓'` - Used by record_purchase method  
+- `purchased: '❌'` - Used for skipped items
+- Empty/nil - Items that need to be purchased
+
+**Multiple Purchase Paths:**
+1. **Shopping list items**: `handle_shopping_list_completion` → `record_purchase`
+2. **Manual items**: `handle_add_new_item` → `handle_add_and_purchase_json` → `record_purchase`
+3. **Known item dialogs**: `navigate_and_show_dialog_for_known_item` → `record_purchase`
+
+**Google Sheets Sync Requirements:**
+- Requires BOTH correct purchased status AND purchased_quantity > 0
+- Checks for `purchased == 'purchased'` OR `purchased == '✓'`
+- Falls back to `❌` if conditions not met
+
+**Three States Required:**
+- **Empty**: Need to buy (included in processing)
+- **✅{qty}**: Purchased (excluded from processing, shows quantity)  
+- **❌**: Skipped (excluded from processing, marked as deliberately skipped)
+
+### Maintenance Guidelines
+- **All purchases must go through `record_purchase()`** - this ensures consistent database + shopping list updates
+- **Avoid duplicate `update_shopping_list_item` calls** - can override purchase status
+- **When debugging purchase issues**: Check that both `purchased` field and `purchased_quantity` are set
+- **Manual items**: Only purchased manual items should appear in shopping list sync
+
+### Known Fragile Points
+- Google Sheets sync logic requires exact format matching
+- Multiple skip detection points can override purchase status
+- Manual item routing through shopping list completion handlers can cause incorrect status
