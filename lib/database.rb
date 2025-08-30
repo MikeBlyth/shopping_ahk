@@ -149,8 +149,156 @@ class WalmartDatabase
     end
   end
   
+  def test_backup
+    puts "🧪 Testing backup functionality..."
+    result = create_rotating_backup
+    if result
+      puts "✅ Test backup successful: #{result}"
+    else
+      puts "❌ Test backup failed"
+    end
+    result
+  end
+  
+  def create_rotating_backup(max_backups: 7)
+    require 'fileutils'
+    
+    backup_dir = File.join(Dir.pwd, 'backups')
+    FileUtils.mkdir_p(backup_dir)
+    
+    timestamp = Time.now.strftime('%Y%m%d_%H%M%S')
+    backup_file = File.join(backup_dir, "walmart_backup_#{timestamp}.sql")
+    
+    begin
+      # Get database connection info
+      db_config = get_db_config
+      
+      # Build command parts directly
+      cmd_parts = ['pg_dump']
+      cmd_parts << "--host=#{db_config[:host]}"
+      cmd_parts << "--port=#{db_config[:port]}"
+      cmd_parts << "--username=#{db_config[:user]}"
+      cmd_parts << "--no-password"
+      cmd_parts << "--verbose"
+      cmd_parts << "--clean"
+      cmd_parts << "--if-exists"
+      cmd_parts << "--create"
+      cmd_parts << "--file=\"#{backup_file}\""
+      cmd_parts << db_config[:database]
+      
+      puts "Creating database backup: #{File.basename(backup_file)}"
+      puts "🔍 DEBUG: Running command parts: #{cmd_parts.join(' ')}"
+      
+      # Set environment variable in Ruby process
+      old_pgpassword = ENV['PGPASSWORD']
+      ENV['PGPASSWORD'] = db_config[:password] if db_config[:password]
+      
+      # Use backticks to capture output and check exit status
+      output = `#{cmd_parts.join(' ')} 2>&1`
+      exit_status = $?.exitstatus
+      
+      # Restore original environment variable
+      if old_pgpassword
+        ENV['PGPASSWORD'] = old_pgpassword
+      else
+        ENV.delete('PGPASSWORD')
+      end
+      
+      puts "🔍 DEBUG: Exit status: #{exit_status}"
+      puts "🔍 DEBUG: Output: #{output}" unless output.empty?
+      
+      if exit_status == 0 && File.exist?(backup_file)
+        puts "✅ Backup created successfully: #{backup_file}"
+        cleanup_old_backups(backup_dir, max_backups)
+        return backup_file
+      else
+        puts "❌ Backup failed (exit code: #{exit_status})"
+        puts "❌ Error output: #{output}" unless output.empty?
+        return nil
+      end
+      
+    rescue => e
+      puts "❌ Backup error: #{e.message}"
+      return nil
+    end
+  end
+
   def close
     @db.disconnect if @db
+  end
+
+  private
+  
+  def get_db_config
+    database_url = ENV['DATABASE_URL']
+    
+    if database_url
+      # Parse DATABASE_URL format: postgres://user:password@host:port/database
+      uri = URI.parse(database_url)
+      {
+        host: uri.host,
+        port: uri.port || 5432,
+        database: uri.path[1..-1], # Remove leading slash
+        user: uri.user,
+        password: uri.password
+      }
+    else
+      # Use individual environment variables
+      {
+        host: ENV['POSTGRES_HOST'] || 'localhost',
+        port: ENV['POSTGRES_PORT'] || 5432,
+        database: ENV['POSTGRES_DB'] || 'walmart',
+        user: ENV['POSTGRES_USER'] || 'mike',
+        password: ENV['POSTGRES_PASSWORD']
+      }
+    end
+  end
+  
+  def build_pg_dump_command(config, backup_file)
+    cmd_parts = ['pg_dump']
+    cmd_parts << "--host=#{config[:host]}"
+    cmd_parts << "--port=#{config[:port]}"
+    cmd_parts << "--username=#{config[:user]}"
+    cmd_parts << "--no-password" # Use PGPASSWORD environment variable
+    cmd_parts << "--verbose"
+    cmd_parts << "--clean"
+    cmd_parts << "--if-exists"
+    cmd_parts << "--create"
+    cmd_parts << "--file=\"#{backup_file}\"" # Quote the file path
+    cmd_parts << config[:database]
+    
+    # For Windows, we need to set environment variable differently
+    if config[:password]
+      if RUBY_PLATFORM =~ /mswin|mingw|cygwin/
+        # Windows: use set command
+        "set PGPASSWORD=#{config[:password]} && #{cmd_parts.join(' ')}"
+      else
+        # Unix: use export
+        "PGPASSWORD=#{config[:password]} #{cmd_parts.join(' ')}"
+      end
+    else
+      cmd_parts.join(' ')
+    end
+  end
+  
+  def cleanup_old_backups(backup_dir, max_backups)
+    return unless max_backups > 0
+    
+    backup_files = Dir.glob(File.join(backup_dir, 'walmart_backup_*.sql'))
+                     .sort_by { |f| File.mtime(f) }
+                     .reverse # Newest first
+    
+    if backup_files.length > max_backups
+      files_to_delete = backup_files[max_backups..-1]
+      files_to_delete.each do |file|
+        begin
+          File.delete(file)
+          puts "🗑️  Deleted old backup: #{File.basename(file)}"
+        rescue => e
+          puts "⚠️  Could not delete old backup #{File.basename(file)}: #{e.message}"
+        end
+      end
+    end
   end
 end
 

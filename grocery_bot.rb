@@ -99,6 +99,10 @@ class WalmartGroceryAssistant
       sync_database_to_sheets
       @sync_completed = true
     end
+    
+    # Always create backup at end of session (regardless of changes)
+    puts '💾 Creating database backup...'
+    @db.create_rotating_backup
   rescue StandardError => e
     puts "\n❌ An error occurred: #{e.message}"
     puts "📍 Location: #{e.backtrace.first}"
@@ -138,6 +142,10 @@ class WalmartGroceryAssistant
           result = @sheets_sync.sync_from_database(@db, @shopping_list_data)
           puts "✅ Sync complete: #{result[:products]} products, #{result[:shopping_items]} shopping items"
           @sync_completed = true
+          
+          # Create rotating database backup after final sync
+          puts '💾 Creating database backup...'
+          @db.create_rotating_backup
         rescue StandardError => e
           puts "❌ Final sheet sync failed: #{e.message}"
         end
