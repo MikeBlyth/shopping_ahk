@@ -512,6 +512,13 @@ class WalmartGroceryAssistant
         handle_shopping_list_completion(item_name, response)
         puts "   ✅ Item '#{item_name}' completed"
         break
+      when 'status'
+        if response[:value] == 'skipped'
+          @logger.debug("Skip response received, handling completion.")
+          handle_shopping_list_completion(item_name, response)
+          puts "   ✅ Item '#{item_name}' completed"
+          break
+        end
       else
         # Handle other response types that might complete the item
         if response[:type] != 'status'
@@ -537,6 +544,7 @@ class WalmartGroceryAssistant
     # Check for skip first, before processing purchase data
     if parsed_response[:type] == 'status' && parsed_response[:value] == 'skipped'
       puts '🔍 DEBUG: SKIP DETECTED - handling skip immediately'
+      puts "🔍 DEBUG: ❌ SET AT LINE 548 - handle_shopping_list_completion skip detection"
       # User clicked "Skip Item" - mark with red X
       update_shopping_list_item(original_item_name,
                                 purchased: '❌', # Red X for skipped items
@@ -886,14 +894,6 @@ class WalmartGroceryAssistant
           record_purchase(item_for_purchase, price_cents: price_cents, quantity: purchase_quantity)
           puts "✅ Recorded purchase: #{purchase_quantity}x #{item_for_purchase[:description]} @ $#{price}"
 
-          # Add to shopping list data for sync display
-          total_price = price * purchase_quantity
-          update_shopping_list_item(item_for_purchase[:description], {
-                                      purchased: '✓',
-                                      itemno: item_for_purchase[:prod_id],
-                                      price: total_price,
-                                      url: item_for_purchase[:url] || url
-                                    })
         rescue StandardError => e
           puts "❌ DEBUG: Purchase recording failed: #{e.message}"
         end
@@ -938,15 +938,6 @@ class WalmartGroceryAssistant
         record_purchase(new_item, price_cents: price_cents, quantity: purchase_quantity)
         puts "✅ Recorded purchase: #{purchase_quantity}x #{description} @ $#{price}"
 
-        # Add to shopping list data for sync display
-        total_price = price * purchase_quantity
-        update_shopping_list_item(description, {
-                                    purchased: '✓',
-                                    itemno: prod_id,
-                                    price: total_price,
-                                    modifier: modifier,
-                                    url: url
-                                  })
       else
         puts '✅ Item added without purchase (no price provided)'
         # Do NOT add to shopping list data - manual items without purchase shouldn't appear on list
@@ -1031,6 +1022,7 @@ class WalmartGroceryAssistant
     when 'status'
       # Handle status responses like 'skipped' from skip button
       if parsed_response[:value] == 'skipped'
+        puts "🔍 DEBUG: ❌ SET AT LINE 1025 - navigate_and_show_dialog_for_known_item skip handling"
         # User clicked "Skip Item" - mark with red X
         update_shopping_list_item(item_name,
                                   purchased: '❌',
@@ -1164,6 +1156,7 @@ class WalmartGroceryAssistant
     when 'status'
       # Handle status responses like 'skipped' from skip button
       if parsed_response[:value] == 'skipped'
+        puts "🔍 DEBUG: ❌ SET AT LINE 1158 - handle_user_interaction skip handling"
         # User clicked "Skip Item" - mark with red X
         update_shopping_list_item(original_shopping_item_name,
                                   purchased: '❌', # Red X for skipped items
@@ -1234,6 +1227,7 @@ class WalmartGroceryAssistant
     total_price = price_paid ? price_paid * quantity : 0.0
     update_shopping_list_item(completion_name,
                               purchased: '✓',
+                              purchased_quantity: quantity,
                               itemno: item[:prod_id],
                               price: total_price)
 

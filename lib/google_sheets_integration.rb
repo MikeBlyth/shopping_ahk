@@ -392,7 +392,7 @@ module GoogleSheetsIntegration
         puts "🔍 DEBUG: Item #{index + 1}: #{shopping_item[:item]} - price: '#{shopping_item[:price]}' (#{shopping_item[:price].class}), purchased: '#{shopping_item[:purchased]}', qty: #{shopping_item[:purchased_quantity]}"
 
         # Format purchased display consistently
-        if shopping_item[:purchased] == 'purchased' && shopping_item[:purchased_quantity] && shopping_item[:purchased_quantity] > 0
+        if (shopping_item[:purchased] == 'purchased' || shopping_item[:purchased] == '✓') && shopping_item[:purchased_quantity] && shopping_item[:purchased_quantity] > 0
           purchased_display = "✅#{shopping_item[:purchased_quantity]}"
         else
           purchased_display = '❌'
