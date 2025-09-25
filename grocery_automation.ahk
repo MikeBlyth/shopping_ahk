@@ -776,6 +776,7 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     
     ; Show dialog immediately (positioned 400px left of center)
     dialogX := (A_ScreenWidth / 2) - 400 - 250  ; Center minus 400px minus half dialog width
+    dialogX := 600 ; Center minus 400px minus half dialog width
     addItemGui.Show("x" . dialogX)
     
     ; Start purchase detection after dialog is shown
