@@ -77,27 +77,17 @@ LoadPriceCharacters()
 ; Load subscribe pattern for auto-detection
 LoadSubscribePattern()
 
-; Show initial status
-ShowPersistentStatus("Assistant ready - select browser window and click OK to start")
-
-MsgBox("AutoHotkey ready!`n`nPlease select your browser window with Walmart.com open and click OK to start.", "Walmart Assistant", 0x40000)
-
-; Auto-start after initial dialog closes
-UserReady := true
-SendStatus("ready")
-MsgBox("Status ready sent via JSON")
-TargetWindowHandle := WinExist("A")
-
+; Automatically find and select Walmart window
+TargetWindowHandle := WinExist("Walmart")
 if !TargetWindowHandle {
-    MsgBox("Could not find an active window handle.")
+    MsgBox("No Walmart window found. Please open walmart.com first.")
     ExitApp
 }
-
-; Immediately activate the captured window to ensure it's the browser
 WinActivate(TargetWindowHandle)
-WinWaitActive(TargetWindowHandle, , 3)  ; 3 second timeout
-; Show confirmation of which window we're using
-MsgBox("Using window: " . WinGetTitle(TargetWindowHandle), "Confirmation", "T2")  ; 2 second auto-dismiss
+
+; Auto-start after window selection
+UserReady := true
+SendStatus("ready")
 
 ; Update status for shopping mode
 ShowPersistentStatus("Processing shopping list")
