@@ -378,9 +378,9 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     ; Show dialog immediately (positioned 400px left of center)
     dialogX := (A_ScreenWidth / 2) - 400 - 200  ; Center minus 400px minus half dialog width
     purchaseGui.Show("x" . dialogX)
-    
-    ; Start purchase detection after dialog is shown
-    SetTimer(() => StartPurchaseDetection(), -100)  ; Run once after 100ms delay
+
+    ; Start purchase detection and price detection immediately
+    SetTimer(StartDetectionForPurchaseDialog.Bind(priceEdit), -100)  ; Run once after 100ms delay
 }
 
 ; Event handler functions for Purchase dialog
@@ -778,9 +778,9 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     dialogX := (A_ScreenWidth / 2) - 400 - 250  ; Center minus 400px minus half dialog width
     dialogX := 600 ; Center minus 400px minus half dialog width
     addItemGui.Show("x" . dialogX)
-    
-    ; Start purchase detection after dialog is shown
-    SetTimer(() => StartPurchaseDetection(), -100)  ; Run once after 100ms delay
+
+    ; Start purchase detection and price detection immediately
+    SetTimer(StartDetectionForAddItemDialog.Bind(priceEdit), -100)  ; Run once after 100ms delay
 }
 
 ; Event handler functions for Add Item dialog
@@ -1077,20 +1077,9 @@ StartPurchaseDetection() {
             CurrentPurchaseButton.Text := "✅ Add & Purchase"
             CurrentPurchaseButton.Opt("BackgroundGreen cWhite")
             
-            ; Start price detection now that user clicked Add to Cart
-            ; Only start if we have a valid dialog with price field open
-            if (CurrentPriceEdit && IsObject(CurrentPriceEdit)) {
-                try {
-                    ; Test if the price edit control is still valid
-                    testText := CurrentPriceEdit.Text
-                    StartPriceDetection(CurrentPriceEdit)
-                    FileAppend("Price detection started - dialog is present`n", "command_debug.txt")
-                } catch {
-                    FileAppend("Skipping price detection - dialog not present or invalid`n", "command_debug.txt")
-                }
-            } else {
-                FileAppend("Skipping price detection - no dialog present`n", "command_debug.txt")
-            }
+            ; Price detection already started when dialog opened
+            ; Just update button appearance to confirm cart addition
+            FileAppend("Add to Cart click detected - price detection already active`n", "command_debug.txt")
         }
     } else {
         ; Debug: Log when click detection is not active
@@ -1100,6 +1089,17 @@ StartPurchaseDetection() {
             FileAppend("CLICK DEBUG: Click ignored - CurrentPurchaseButton not set`n", "command_debug.txt")
         }
     }
+}
+
+; Helper functions for timer callbacks
+StartDetectionForPurchaseDialog(priceEdit) {
+    StartPurchaseDetection()
+    StartPriceDetection(priceEdit)
+}
+
+StartDetectionForAddItemDialog(priceEdit) {
+    StartPurchaseDetection()
+    StartPriceDetection(priceEdit)
 }
 
 ; Price Detection Functions
