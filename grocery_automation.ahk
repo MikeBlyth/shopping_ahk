@@ -80,8 +80,12 @@ LoadSubscribePattern()
 ; Automatically find and select Walmart window
 TargetWindowHandle := WinExist("Walmart")
 if !TargetWindowHandle {
-    MsgBox("No Walmart window found. Please open walmart.com first.")
-    ExitApp
+    ; No Walmart window found - find any browser and open new tab
+    TargetWindowHandle := FindAndOpenWalmart()
+    if !TargetWindowHandle {
+        MsgBox("Could not find a browser window or open Walmart. Please open a browser first.")
+        ExitApp
+    }
 }
 WinActivate(TargetWindowHandle)
 
@@ -1079,6 +1083,29 @@ StartPurchaseDetection() {
             FileAppend("CLICK DEBUG: Click ignored - CurrentPurchaseButton not set`n", "command_debug.txt")
         }
     }
+}
+
+; Function to find browser and open new Walmart tab
+FindAndOpenWalmart() {
+    ; Try to find any common browser window
+        browserHandle := WinExist('Baseline')
+        if browserHandle {
+            ; Activate browser
+            WinActivate(browserHandle)
+            WinWaitActive(browserHandle, , 2)
+
+            ; Open new tab with Walmart
+            Send("^t")  ; Ctrl+T for new tab
+            Sleep(500)
+            Send("walmart.com{Enter}")
+            Sleep(2000)  ; Wait for page to start loading
+
+            ; Return the browser handle (title will update to include Walmart)
+            return browserHandle
+        }
+
+    FileAppend("No browser windows found`n", "command_debug.txt")
+    return 0
 }
 
 ; Helper functions for timer callbacks
