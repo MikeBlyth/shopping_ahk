@@ -188,11 +188,17 @@ OpenURL(url) {
     WinActivate(TargetWindowHandle)
     WinWaitActive(TargetWindowHandle)
     WriteDebug("DEBUG: OpenURL called for: " . url)
-    PasteURL(url)
-    
-    ; Return immediately - don't wait for page loading
-    WriteDebug("DEBUG: OpenURL sending ready status")
-    SendStatus("ready")
+
+    try {
+        PasteURL(url)
+        WriteDebug("DEBUG: OpenURL sending ready status")
+        SendStatus("ready")
+        return true
+    } catch as e {
+        WriteDebug("ERROR: OpenURL failed: " . e.message)
+        SendError("Failed to navigate to: " . url)
+        return false
+    }
 }
 
 PasteURL(url) {
@@ -1088,21 +1094,31 @@ StartPurchaseDetection() {
 ; Function to find browser and open new Walmart tab
 FindAndOpenWalmart() {
     ; Try to find any common browser window
-        browserHandle := WinExist('Baseline')
-        if browserHandle {
-            ; Activate browser
-            WinActivate(browserHandle)
-            WinWaitActive(browserHandle, , 2)
+    browserHandle := WinExist('Baseline')
+    if browserHandle {
+        ; Set global handle for OpenURL to use
+        global TargetWindowHandle := browserHandle
 
-            ; Open new tab with Walmart
-            Send("^t")  ; Ctrl+T for new tab
-            Sleep(500)
-            Send("walmart.com{Enter}")
+        ; Activate browser
+        WinActivate(browserHandle)
+        WinWaitActive(browserHandle, , 2)
+
+        ; Open new tab
+        Send("^t")  ; Ctrl+T for new tab
+        Sleep(500)
+
+        ; Use OpenURL to navigate to Walmart (without Ruby messaging)
+        try {
+            PasteURL("https://walmart.com")
             Sleep(2000)  ; Wait for page to start loading
-
-            ; Return the browser handle (title will update to include Walmart)
+            FileAppend("Successfully opened Walmart tab`n", "command_debug.txt")
             return browserHandle
+        } catch as e {
+            FileAppend("Failed to navigate to Walmart: " . e.message . "`n", "command_debug.txt")
+            MsgBox("Failed to open Walmart page in browser. Please try manually opening walmart.com")
+            return 0
         }
+    }
 
     FileAppend("No browser windows found`n", "command_debug.txt")
     return 0
