@@ -21,6 +21,13 @@ SendMode "Input"
     ShowAddItemDialogHotkey()
 }
 
+^+e::{
+    ; Edit purchase hotkey
+    WriteDebug("Ctrl+Shift+E pressed - calling EditPurchaseHotkey")
+    EditPurchaseHotkey()
+}
+
+
 ^+s::{  ; Ctrl+Shift+S to show status
     status := FileExist(StatusFile) ? FileRead(StatusFile) : "No status file"
     MsgBox("Current Status: " . status . "`n`nActive hotkeys: Ctrl+Shift+A (add item), Ctrl+Shift+Q (quit)")
@@ -169,6 +176,15 @@ ProcessCommand(command) {
         case "ADD_ITEM_DIALOG":
             FileAppend("MATCHED ADD_ITEM_DIALOG`n", "command_debug.txt")
             ShowAddItemDialog(param)
+        case "SHOW_PURCHASE_SEARCH_DIALOG":
+            FileAppend("MATCHED SHOW_PURCHASE_SEARCH_DIALOG`n", "command_debug.txt")
+            ShowPurchaseSearchDialogAHK()
+        case "SHOW_PURCHASE_SELECTION_DIALOG":
+            FileAppend("MATCHED SHOW_PURCHASE_SELECTION_DIALOG`n", "command_debug.txt")
+            ShowPurchaseSelectionDialogAHK(param)
+        case "SHOW_EDITABLE_PURCHASE_DIALOG":
+            FileAppend("MATCHED SHOW_EDITABLE_PURCHASE_DIALOG`n", "command_debug.txt")
+            ShowEditablePurchaseDialogAHK(param)
         case "TERMINATE":
             FileAppend("MATCHED TERMINATE - shutting down`n", "command_debug.txt")
             
@@ -685,6 +701,14 @@ ShowAddItemDialogHotkey() {
     ; THEN send lookup request to Ruby (after dialog is created)
     WriteDebug("Sending lookup request for URL: " . currentUrl)
     SendLookupRequest(currentUrl)
+}
+
+EditPurchaseHotkey() {
+    WriteDebug("EditPurchaseHotkey called - sending EDIT_PURCHASE_WORKFLOW to Ruby")
+    response_obj := Map()
+    response_obj["type"] := "edit_purchase_workflow"
+    response_obj["value"] := "initiated"
+    WriteResponseJSON(response_obj)
 }
 
 ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
@@ -1296,6 +1320,158 @@ CleanupDialogReferences() {
     CurrentAddItemDialog := ""
     CurrentDialogControls := ""
     WriteDebug("Dialog references cleaned up")
+}
+
+ShowPurchaseSearchDialogAHK() {
+    searchGui := Gui("+AlwaysOnTop", "Search Purchases")
+    searchGui.SetFont("s10")
+
+    searchGui.Add("Text", , "Search Term (item name or ID):")
+    searchTermEdit := searchGui.Add("Edit", "w300 r1")
+
+    searchGui.Add("Text", "xm y+10", "Start Date (YYYY-MM-DD, optional):")
+    startDateEdit := searchGui.Add("Edit", "w150 r1")
+
+    searchGui.Add("Text", "xm y+10", "End Date (YYYY-MM-DD, optional):")
+    endDateEdit := searchGui.Add("Edit", "w150 r1")
+
+    findButton := searchGui.Add("Button", "xm y+20 w100 h30", "Find")
+    cancelButton := searchGui.Add("Button", "x+10 w100 h30", "Cancel")
+
+    findButton.OnEvent("Click", (*) => FindPurchasesClickHandler(searchGui, searchTermEdit, startDateEdit, endDateEdit))
+    cancelButton.OnEvent("Click", (*) => CancelSearchClickHandler(searchGui))
+    searchGui.OnEvent("Close", (*) => CancelSearchClickHandler(searchGui))
+
+    searchGui.Show("x" . (A_ScreenWidth / 2 - 200) . " y" . (A_ScreenHeight / 2 - 150))
+}
+
+ShowPurchaseSelectionDialogAHK(jsonParam) {
+    purchases := jsongo.Parse(jsonParam)
+
+    selectionGui := Gui("+AlwaysOnTop", "Select Purchase")
+    selectionGui.SetFont("s10")
+
+    selectionGui.Add("Text", "w400", "Select a purchase to edit or delete:")
+
+    yPos := "y+5"
+    if (purchases.Length > 0) {
+        loop purchases.Length {
+            purchase := purchases[A_Index]
+            itemDesc := purchase["item_description"]
+            purchaseDate := SubStr(purchase["purchase_date"], 1, 10) ; YYYY-MM-DD
+            quantity := purchase["quantity"]
+            price := Format("{:.2f}", purchase["price_cents"] / 100)
+
+            display_text := Format("{} - {}x ${} on {}", itemDesc, quantity, price, purchaseDate)
+            selectionGui.Add("Text", "xm " . yPos . " w300", display_text)
+            selectionGui.Add("Button", "x+5 w80 h25", "Select").OnEvent("Click", (*) => SelectPurchaseClickHandler(selectionGui, purchase["id"]))
+            yPos := "y+5"
+        }
+    } else {
+        selectionGui.Add("Text", "xm " . yPos . " w400", "No purchases found. You can add a new one.")
+    }
+
+    selectionGui.Add("Button", "xm y+20 w120 h30", "New Purchase").OnEvent("Click", (*) => NewPurchaseClickHandler(selectionGui))
+    selectionGui.Add("Button", "x+10 w100 h30", "Cancel").OnEvent("Click", (*) => CancelSelectionClickHandler(selectionGui))
+    selectionGui.OnEvent("Close", (*) => CancelSelectionClickHandler(selectionGui))
+
+    selectionGui.Show("x" . (A_ScreenWidth / 2 - 250) . " y" . (A_ScreenHeight / 2 - 200))
+}
+
+ShowEditablePurchaseDialogAHK(jsonParam) {
+    purchaseData := jsongo.Parse(jsonParam)
+    isNewPurchase := !purchaseData.Has("id")
+
+    editGui := Gui("+AlwaysOnTop", isNewPurchase ? "Add New Purchase" : "Edit Purchase")
+    editGui.SetFont("s10")
+
+    if isNewPurchase {
+        editGui.Add("Text", , "Product ID:")
+        prodIdEdit := editGui.Add("Edit", "w200 r1")
+    } else {
+        editGui.Add("Text", , "Purchase ID: " . purchaseData["id"])
+        editGui.Add("Text", "xm y+5", "Item: " . purchaseData["item_description"])
+    }
+
+    editGui.Add("Text", "xm y+10", "Quantity:")
+    quantityEdit := editGui.Add("Edit", "w100 r1", purchaseData.Has("quantity") ? purchaseData["quantity"] : "1")
+
+    editGui.Add("Text", "xm y+10", "Price:")
+    priceEdit := editGui.Add("Edit", "w100 r1", purchaseData.Has("price_cents") ? Format("{:.2f}", purchaseData["price_cents"] / 100) : "")
+
+    editGui.Add("Text", "xm y+10", "Purchase Date (YYYY-MM-DD):")
+    purchaseDateEdit := editGui.Add("Edit", "w150 r1", purchaseData.Has("purchase_date") ? SubStr(purchaseData["purchase_date"], 1, 10) : FormatTime(,"yyyy-MM-dd"))
+
+    saveButton := editGui.Add("Button", "xm y+20 w100 h30", "Save")
+    cancelButton := editGui.Add("Button", "x+10 w100 h30", "Cancel")
+    if !isNewPurchase {
+        deleteButton := editGui.Add("Button", "x+10 w100 h30 BackgroundRed cWhite", "Delete")
+    }
+
+    saveButton.OnEvent("Click", (*) => SavePurchaseClickHandler(editGui, purchaseData, isNewPurchase, prodIdEdit, quantityEdit, priceEdit, purchaseDateEdit))
+    cancelButton.OnEvent("Click", (*) => CancelEditClickHandler(editGui))
+    if !isNewPurchase {
+        deleteButton.OnEvent("Click", (*) => DeletePurchaseClickHandler(editGui, purchaseData["id"]))
+    }
+    editGui.OnEvent("Close", (*) => CancelEditClickHandler(editGui))
+
+    editGui.Show("x" . (A_ScreenWidth / 2 - 200) . " y" . (A_ScreenHeight / 2 - 250))
+}
+
+SavePurchaseClickHandler(gui, originalPurchaseData, isNewPurchase, prodIdEdit, quantityEdit, priceEdit, purchaseDateEdit) {
+    response_obj := Map()
+    newQuantity := Trim(quantityEdit.Text)
+    newPrice := Trim(priceEdit.Text)
+    newPurchaseDate := Trim(purchaseDateEdit.Text)
+
+    ; Basic validation
+    if !IsNumber(newQuantity) || Integer(newQuantity) < 1 {
+        MsgBox("Please enter a valid quantity (number > 0).")
+        return
+    }
+    if !IsNumber(newPrice) || Float(newPrice) < 0 {
+        MsgBox("Please enter a valid price (number >= 0).")
+        return
+    }
+    if !RegExMatch(newPurchaseDate, "^\d{4}-\d{2}-\d{2}$") {
+        MsgBox("Please enter a valid date in YYYY-MM-DD format.")
+        return
+    }
+
+    if isNewPurchase {
+        newProdId := Trim(prodIdEdit.Text)
+        if newProdId = "" {
+            MsgBox("Product ID is required for a new purchase.")
+            return
+        }
+        response_obj["type"] := "purchase_added"
+        response_obj["prod_id"] := newProdId
+    } else {
+        response_obj["type"] := "purchase_updated"
+        response_obj["purchase_id"] := originalPurchaseData["id"]
+    }
+    response_obj["quantity"] := Integer(newQuantity)
+    response_obj["price"] := Float(newPrice)
+    response_obj["purchase_date"] := newPurchaseDate
+
+    WriteResponseJSON(response_obj)
+    gui.Destroy()
+}
+
+DeletePurchaseClickHandler(gui, purchaseId) {
+    if MsgBox("Are you sure you want to delete this purchase?", "Confirm Delete", "YesNo") = "No" {
+        return
+    }
+    response_obj := Map()
+    response_obj["type"] := "purchase_deleted"
+    response_obj["purchase_id"] := purchaseId
+    WriteResponseJSON(response_obj)
+    gui.Destroy()
+}
+
+CancelEditClickHandler(gui) {
+    SendStatus("cancelled")
+    gui.Destroy()
 }
 
 ; Process lookup result from Ruby

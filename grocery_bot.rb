@@ -1322,13 +1322,131 @@ class WalmartGroceryAssistant
       when 'add_and_purchase'
         @logger.info("Processing 'add_and_purchase' request...")
         handle_add_new_item(response)
+      when 'edit_purchase_workflow'
+        @logger.info("Processing 'edit_purchase_workflow' request...")
+        handle_edit_purchase_workflow(parsed_response)
       else
         @logger.warn("Unrecognized response type '#{parsed_response[:type]}', attempting to process with legacy handler.")
         handle_add_new_item(response)
       end
     end
   end
-end
+
+  private
+
+  def handle_edit_purchase_workflow(response)
+    @logger.debug("handle_edit_purchase_workflow called with: #{response.inspect}")
+
+    # 1. Ask AHK to show a search dialog
+    search_response = @ahk.show_purchase_search_dialog
+    parsed_search_response = parse_response(search_response)
+
+    if parsed_search_response[:type] == 'status' && parsed_search_response[:value] == 'cancelled'
+      @ahk.show_message("Purchase editing cancelled.")
+      return # Exit workflow if user cancels search
+    end
+
+    search_term = parsed_search_response[:search_term]
+    start_date_str = parsed_search_response[:start_date]
+    end_date_str = parsed_search_response[:end_date]
+
+    start_date = start_date_str ? Date.parse(start_date_str) : nil rescue nil
+    end_date = end_date_str ? Date.parse(end_date_str) : nil rescue nil
+
+    @logger.debug("Search parameters: term='#{search_term}', start_date='#{start_date}', end_date='#{end_date}'")
+
+    # 2. Query the database
+    purchases = @db.find_purchases(search_term: search_term, start_date: start_date, end_date: end_date, limit: 50)
+
+    if purchases.empty?
+      @ahk.show_message("No purchases found matching your criteria.")
+      return
+    end
+
+    # 3. Send search results to AHK for selection
+    selection_response = @ahk.show_purchase_selection_dialog(purchases)
+    parsed_selection_response = parse_response(selection_response)
+
+    if parsed_selection_response[:type] == 'status' && parsed_selection_response[:value] == 'cancelled'
+      @ahk.show_message("Purchase selection cancelled.")
+      return # Exit workflow if user cancels selection
+    end
+
+    selected_purchase_id = parsed_selection_response[:purchase_id]
+
+    if selected_purchase_id
+      # User selected an existing purchase
+      purchase_to_edit = @db.find_purchase_by_id(selected_purchase_id)
+      if purchase_to_edit
+        @logger.debug("Editing existing purchase: #{purchase_to_edit.inspect}")
+        editable_response = @ahk.show_editable_purchase_dialog(purchase_to_edit)
+        handle_editable_purchase_response(editable_response, purchase_to_edit)
+      else
+        @ahk.show_message("Error: Selected purchase not found in database.")
+      end
+    elsif parsed_selection_response[:type] == 'new_purchase'
+      # User chose to add a new purchase
+      @logger.debug("Adding new purchase.")
+      editable_response = @ahk.show_editable_purchase_dialog(nil) # Pass nil for new purchase
+      handle_editable_purchase_response(editable_response, nil)
+    else
+      @ahk.show_message("No purchase selected or new purchase requested.")
+    end
+  end
+
+  private
+
+  def handle_editable_purchase_response(response, original_purchase)
+    parsed_response = parse_response(response)
+
+    if parsed_response[:type] == 'status' && parsed_response[:value] == 'cancelled'
+      @ahk.show_message("Purchase editing cancelled.")
+      return
+    end
+
+    case parsed_response[:type]
+    when 'purchase_updated'
+      purchase_id = parsed_response[:purchase_id]
+      new_quantity = parsed_response[:quantity].to_i
+      new_price_cents = (parsed_response[:price].to_f * 100).to_i
+
+      if original_purchase && original_purchase[:id] == purchase_id
+        @db.update_purchase(purchase_id, quantity: new_quantity, price_cents: new_price_cents)
+        @ahk.show_message("Purchase ID #{purchase_id} updated successfully.")
+      else
+        @ahk.show_message("Error: Mismatched purchase ID for update.")
+      end
+    when 'purchase_deleted'
+      purchase_id = parsed_response[:purchase_id]
+      if original_purchase && original_purchase[:id] == purchase_id
+        @db.delete_purchase(purchase_id)
+        @ahk.show_message("Purchase ID #{purchase_id} deleted successfully.")
+      else
+        @ahk.show_message("Error: Mismatched purchase ID for delete.")
+      end
+    when 'purchase_added'
+      prod_id = parsed_response[:prod_id]
+      quantity = parsed_response[:quantity].to_i
+      price_cents = (parsed_response[:price].to_f * 100).to_i
+      purchase_date_str = parsed_response[:purchase_date]
+      purchase_date = purchase_date_str ? Date.parse(purchase_date_str) : Date.today rescue Date.today
+
+      if prod_id && !prod_id.empty?
+        # Check if item exists, if not, create a minimal one
+        unless @db.find_item_by_prod_id(prod_id)
+          @db.create_item(prod_id: prod_id, url: "", description: "Unknown Item (from manual purchase)", default_quantity: 1, priority: 5)
+        end
+        @db.record_purchase(prod_id: prod_id, quantity: quantity, price_cents: price_cents, purchase_date: purchase_date)
+        @ahk.show_message("New purchase added successfully for Prod ID: #{prod_id}.")
+      else
+        @ahk.show_message("Error: Product ID is required to add a new purchase.")
+      end
+    else
+      @ahk.show_message("Unexpected response from editable purchase dialog.")
+    end
+  end
+
+  def setup_cleanup_handlers
 
 if __FILE__ == $0
   assistant = WalmartGroceryAssistant.new

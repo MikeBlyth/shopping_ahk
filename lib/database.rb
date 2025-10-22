@@ -110,6 +110,47 @@ class WalmartDatabase
       .all
   end
 
+  def find_purchase_by_id(purchase_id)
+    @purchases.where(id: purchase_id).first
+  end
+
+  def update_purchase(purchase_id, updates)
+    @purchases.where(id: purchase_id).update(updates.merge(purchase_timestamp: Time.now))
+  end
+
+  def delete_purchase(purchase_id)
+    @purchases.where(id: purchase_id).delete
+  end
+
+  def find_purchases(search_term: nil, start_date: nil, end_date: nil, limit: 20)
+    query = @purchases.join(@items, prod_id: :prod_id)
+
+    if search_term && !search_term.empty?
+      # Search by prod_id or item description
+      query = query.where(
+        Sequel.|(
+          {Sequel[:purchases][:prod_id] => search_term},
+          Sequel.ilike(Sequel[:items][:description], "%#{search_term}%")
+        )
+      )
+    end
+
+    if start_date
+      query = query.where(Sequel[:purchases][:purchase_date] >= start_date)
+    end
+
+    if end_date
+      query = query.where(Sequel[:purchases][:purchase_date] <= end_date)
+    end
+
+    query.order(Sequel.desc(Sequel[:purchases][:purchase_date]))
+         .limit(limit)
+         .select(Sequel[:purchases].*,
+                 Sequel[:items][:description].as(:item_description),
+                 Sequel[:items][:modifier].as(:item_modifier))
+         .all
+  end
+
   # Utility methods
   def extract_prod_id_from_url(url)
     # Walmart URLs have patterns like:

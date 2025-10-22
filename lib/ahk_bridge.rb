@@ -152,6 +152,29 @@ class AhkBridge
     read_response
   end
 
+  def edit_purchase_workflow
+    send_command('EDIT_PURCHASE_WORKFLOW')
+    read_response # AHK will send back the edited/new purchase data or a status
+  end
+
+  def show_purchase_search_dialog
+    send_command('SHOW_PURCHASE_SEARCH_DIALOG')
+    read_response
+  end
+
+  def show_purchase_selection_dialog(purchases)
+    # Purchases will be an array of hashes. Convert to JSON string.
+    json_purchases = JSON.generate(purchases)
+    send_command('SHOW_PURCHASE_SELECTION_DIALOG', params: json_purchases)
+    read_response
+  end
+
+  def show_editable_purchase_dialog(purchase_data = nil)
+    json_purchase_data = purchase_data ? JSON.generate(purchase_data) : "{}"
+    send_command('SHOW_EDITABLE_PURCHASE_DIALOG', params: json_purchase_data)
+    read_response
+  end
+
 
   def cleanup
     # Gentle cleanup - just reset session but don't terminate AHK
