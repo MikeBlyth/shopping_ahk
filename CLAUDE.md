@@ -250,6 +250,42 @@ The system now operates with just **two user hotkeys**:
 - Ask if I want to stage with "git add ." before making extensive changes
 - AHK is always v2
 
+## Data Extraction Strategy: Browser Extension
+
+The system has been updated to use a modern browser extension for data extraction, replacing the previous, more brittle methods of image search and OCR. This new strategy provides significantly more reliable and faster performance.
+
+### Overview
+
+The core of the new strategy is a browser extension (`/extension` directory) that runs on Walmart product pages. It automatically scrapes key product information directly from the page's DOM (Document Object Model) and communicates it back to the AutoHotkey script.
+
+### Data Flow
+
+1.  **Navigation**: The Ruby script instructs AutoHotkey to navigate to a Walmart product URL.
+2.  **Scraping**: The browser extension's content script (`content.js`) detects the page load and scrapes the following data:
+    *   **Product ID**: Prioritizes the `athancid` URL parameter, with fallbacks to the URL path, meta tags, and `data-sku` attributes.
+    *   **Description**: From the main product title element.
+    *   **Price**: From the primary price element on the page.
+    *   **Out-of-Stock Status**: By checking for "Out of stock" text in the add-to-cart section.
+3.  **Clipboard Transfer**: The scraped data is formatted into a JSON string and copied to the system clipboard.
+4.  **AHK Consumption**: The AutoHotkey script (`grocery_automation.ahk`) waits for this JSON data to appear on the clipboard.
+5.  **Validation & Dialog**: AHK parses the JSON, validates that the scraped Product ID matches the expected ID, and then displays the purchase dialog, pre-filling the price and showing an "Out of Stock" warning if applicable.
+
+### Browser Extension Features
+
+-   **Unpacked Extension**: Located in the `/extension` directory, ready to be loaded in Chrome, Edge, or other Chromium browsers.
+-   **Enable/Disable Toggle**: The extension is disabled by default. It can be enabled or disabled via a popup menu by clicking the extension's icon in the browser toolbar.
+-   **Test Function**: The popup includes a "Run Test" button to manually trigger a scrape and verify its functionality.
+-   **Debug Logging**: The extension provides detailed console logs for debugging the product ID extraction process.
+
+### Installation and Usage
+
+1.  **Open Browser Extensions Page**: Navigate to `chrome://extensions` or `edge://extensions`.
+2.  **Enable Developer Mode**.
+3.  **Load Unpacked**: Click "Load unpacked" and select the `/extension` folder from this project.
+4.  **Enable the Scraper**: Click the new "Walmart Product Scraper" extension icon in your toolbar and click "Enable Detector".
+
+This new architecture replaces the need for `FindText` image search for the "Add to Cart" button and the OCR-based `get_price` function for data extraction.
+
 ## Current Development
 
 ### Purchase Detection - COMPLETED ✅

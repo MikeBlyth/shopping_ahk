@@ -1,0 +1,26 @@
+I want to rework the app so that it gets information from the walmart web pages through a small browser extension and the clipboard. The extension will run whenever a page from walmart.com is loaded and will extract four items: item description, the price, product id, and out-of-stock status. It will copy those to the clipboard as json or pipe-delimited fields whichever is better. 
+
+When AHK sees the page loaded, it will look for the clipboard in that format  and extract the information. The clipboard should be cleared before a new pages is requested, so that it will always (a) be empty or (b) contain the latest opened page. AHK should check for the product id to match the requested one and give a warning if it is not found in the page or does not match. Then AHK should open the purchase dialog and prefill it with the price from the clipboard. 
+
+Walmart DOM
+
+Out of Stock:
+
+<div data-testid="add-to-cart-section" data-seo-id="add-to-cart-section" class="justify-between items-center"><div class="ph3 ph0-m mv3"><div class="flex flex-column"><div class="flex flex-column justify-center"></div><div class="flex-auto"><div class="lh-copy pt2-m flex f4 items-center"><div class="b dark-gray pr3 pt2-m nowrap" style="margin-bottom:5px">Out of stock</div><section data-dca-id="M:A0E03E912D" data-dca-type="module"><button class="w_hhLG w_8nsR w_lgOn w_jDfj" type="button" data-dca-intent="open" data-dca-name="ItemShopSimilarCtaButton" data-dca-id="B:AD56D15A91">Shop similar</button><span></span></section></div></div><div class="cb"></div></div></div><section data-dca-id="M:4D1BFC6075" data-dca-type="module"></section><section data-dca-id="M:0564CE5E8D" data-dca-type="module"></section></div>
+
+Also has
+<button class="w_hhLG w_8nsR w_lgOn w_jDfj" type="button" data-dca-intent="open" data-dca-name="ItemShopSimilarCtaButton" data-dca-id="B:AD56D15A91">Shop similar</button>
+
+key pieces: data-seo-id="add-to-cart-section" containing "Out of stock", button containing "Shop similar"
+
+Price:
+<span itemprop="price" data-seo-id="hero-price" data-fs-element="price" aria-hidden="false" class="">$2.87</span>
+
+Description
+<h1 class="dark-gray mv1 lh-copy f4 mh0 b" id="main-title" data-seo-id="hero-carousel-image" itemprop="name" data-fs-element="name" elementtiming="ip-main-title">Great Value 0% Milkfat Small Curd Fat Free Cottage Cheese, 24 oz</h1>
+
+key pieces: id="main-title"
+
+Product ID: 
+Look for &athancid=<id> within /*[@id="ip-carousel-Similar items you might like"]/section/section/div[2]/ul
+

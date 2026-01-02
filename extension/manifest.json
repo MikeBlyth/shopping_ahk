@@ -1,0 +1,26 @@
+{
+  "name": "Walmart Product Scraper",
+  "version": "1.0",
+  "manifest_version": 3,
+  "description": "Automatically detects product information on Walmart pages and copies it to the clipboard.",
+  "permissions": ["storage", "clipboardWrite", "activeTab"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "images/icon16.png",
+      "48": "images/icon48.png",
+      "128": "images/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "images/icon16.png",
+    "48": "images/icon48.png",
+    "128": "images/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.walmart.com/*"],
+      "js": ["content.js"]
+    }
+  ]
+}

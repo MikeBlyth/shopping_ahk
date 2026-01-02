@@ -311,7 +311,7 @@ ShowItemPrompt(param) {
 }
 
 NavigateAndShowDialog(param) {
-    ; Parse param: "url|item_name|is_known_item|description|item_description|default_quantity"
+    ; Parse param: "url|item_name|is_known_item|description|item_description|default_quantity|expected_product_id"
     parts := StrSplit(param, "|")
     url := parts[1]
     item_name := parts[2]
@@ -319,20 +319,53 @@ NavigateAndShowDialog(param) {
     description := parts.Length >= 4 ? parts[4] : ""
     item_description := parts.Length >= 5 ? parts[5] : item_name
     default_quantity := parts.Length >= 6 ? parts[6] : "1"
+    expected_product_id := parts.Length >= 7 ? parts[7] : "" ; New parameter
     
     FileAppend("NavigateAndShowDialog: Navigating to " . url . "`n", "command_debug.txt")
     
     ; Navigate to URL (background loading)
     WinActivate(TargetWindowHandle)
     WinWaitActive(TargetWindowHandle)
+    A_Clipboard := "" ; Clear clipboard before navigation
     PasteURL(url)
     
-    ; Show dialog immediately while page loads (no lookup needed for known items)
+    ; Wait for product data from browser extension via clipboard
+    walmartProductData := WaitForClipboardJSON(20) ; Increased timeout for page load and script execution
+    
+    prefill_price := ""
+    prefill_description := item_description ; Default to original item description
+    prefill_out_of_stock := false
+    
+    if (walmartProductData) {
+        FileAppend("NavigateAndShowDialog: Received product data from clipboard.`n", "command_debug.txt")
+        
+        extracted_product_id := walmartProductData.Has("productId") ? walmartProductData["productId"] : ""
+        
+        ; --- Product ID Validation ---
+        if (expected_product_id != "" && extracted_product_id != "" && expected_product_id != extracted_product_id) {
+            MsgBox("Warning: Product ID mismatch!" . "`nExpected: " . expected_product_id . "`nFound: " . extracted_product_id, "Product Mismatch", "IconExclamation")
+            FileAppend("NavigateAndShowDialog: Product ID mismatch! Expected: " . expected_product_id . ", Found: " . extracted_product_id . "`n", "command_debug.txt")
+        } else if (expected_product_id != "" && extracted_product_id == "") {
+            MsgBox("Warning: Expected Product ID '" . expected_product_id . "' not found on page.", "Product ID Missing", "IconExclamation")
+            FileAppend("NavigateAndShowDialog: Expected Product ID '" . expected_product_id . "' not found on page.`n", "command_debug.txt")
+        }
+        
+        prefill_price := walmartProductData.Has("price") ? walmartProductData["price"] : ""
+        prefill_description := walmartProductData.Has("description") ? walmartProductData["description"] : item_description
+        prefill_out_of_stock := walmartProductData.Has("outOfStock") ? walmartProductData["outOfStock"] : false
+        
+    } else {
+        FileAppend("NavigateAndShowDialog: No valid Walmart product data received from clipboard within timeout. Showing dialog with default values.`n", "command_debug.txt")
+        MsgBox("Could not retrieve product data from page. Please ensure browser extension is running.", "Data Retrieval Failed", "IconExclamation")
+    }
+    
+    ; Show dialog with pre-filled data (or defaults if clipboard data failed)
     FileAppend("NavigateAndShowDialog: Showing dialog for " . item_name . " (known=" . is_known . ")`n", "command_debug.txt")
-    ShowPurchaseDialog(item_name, is_known, item_description, default_quantity)
+    ; The ShowPurchaseDialog signature needs to be updated to accept prefill_price, prefill_description, prefill_out_of_stock
+    ShowPurchaseDialog(item_name, is_known, prefill_description, default_quantity, prefill_price, prefill_out_of_stock)
 }
 
-ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
+ShowPurchaseDialog(item_name, is_known, item_description, default_quantity, prefill_price := "", prefill_out_of_stock := false) {
     ; Create dialog
     purchaseGui := Gui("+AlwaysOnTop", "Item: " . item_name)
     purchaseGui.SetFont("s10")
@@ -350,7 +383,7 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     
     ; Price field
     purchaseGui.Add("Text", "xm y+15", "Price (leave blank to skip):")
-    priceEdit := purchaseGui.Add("Edit", "w150 r1")
+    priceEdit := purchaseGui.Add("Edit", "w150 r1", prefill_price) ; Use prefill_price
     purchaseGui.Add("Text", "x+5 yp+3", "$")
     
     ; Quantity field
@@ -361,9 +394,16 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     purchaseGui.Add("Text", "xm y+10", "Subscribable (auto-detected):")
     subscribableCheckbox := purchaseGui.Add("Checkbox", "xm y+5 w200 h20", "Subscribable")
     
-    ; Auto-detect subscribable status and set checkbox
-    isSubscribable := DetectSubscribable()
-    subscribableCheckbox.Value := isSubscribable ? 1 : 0
+    ; New logic for Out of Stock and Subscribable
+    if (prefill_out_of_stock) {
+        purchaseGui.Add("Text", "xm y+5 w400 cRed", "⚠️ Item is Out of Stock!")
+        ; Set subscribable checkbox to disabled if out of stock
+        subscribableCheckbox.Enabled := false
+        subscribableCheckbox.Value := 0 ; Ensure it's unchecked
+    } else {
+        isSubscribable := DetectSubscribable()
+        subscribableCheckbox.Value := isSubscribable ? 1 : 0
+    }
     
     ; Buttons - Override button starts as warning state
     addButton := purchaseGui.Add("Button", "xm y+20 w120 h30 BackgroundRed cWhite", "⚠️ Override")
@@ -396,7 +436,14 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     purchaseGui.Show("x" . dialogX)
 
     ; Start purchase detection and price detection immediately
-    SetTimer(StartDetectionForPurchaseDialog.Bind(priceEdit), -100)  ; Run once after 100ms delay
+    ; Only start price detection if not pre-filled and not out of stock
+    if (prefill_price == "" && !prefill_out_of_stock) {
+        SetTimer(StartDetectionForPurchaseDialog.Bind(priceEdit), -100)  ; Run once after 100ms delay
+    } else if (prefill_out_of_stock) {
+        ; If out of stock, disable the Add/Override button visually
+        addButton.Opt("BackgroundLightGray cGray")
+        addButton.Enabled := false
+    }
 }
 
 ; Event handler functions for Purchase dialog
@@ -638,6 +685,37 @@ SendError(errorValue) {
     response_obj["type"] := "error"
     response_obj["value"] := errorValue
     WriteResponseJSON(response_obj)
+}
+
+; --- Clipboard Data Handling Functions ---
+WaitForClipboardJSON(timeoutSeconds := 10) {
+    startTime := A_TickCount
+    clipboardData := ""
+    
+    Loop {
+        clipboardData := A_Clipboard
+        ; Check if clipboard is not empty and starts with JSON marker
+        if (clipboardData != "" && SubStr(clipboardData, 1, 1) = "{" && InStr(clipboardData, "`"walmart_product`":true")) {
+            try {
+                parsedData := jsongo.Parse(clipboardData)
+                ; Double check the marker
+                if (parsedData.Has("walmart_product") && parsedData["walmart_product"] = true) {
+                    WriteDebug("WaitForClipboardJSON: Successfully parsed Walmart product data from clipboard.")
+                    return parsedData
+                }
+            } catch as e {
+                ; Not valid JSON or not our expected format yet, continue waiting
+                WriteDebug("WaitForClipboardJSON: Clipboard contains non-walmart JSON or malformed JSON: " . e.message)
+            }
+        }
+        
+        Sleep(500) ; Wait 500ms before checking again
+        
+        if ((A_TickCount - startTime) / 1000 > timeoutSeconds) {
+            WriteDebug("WaitForClipboardJSON: Timeout waiting for valid Walmart product data in clipboard.")
+            return false
+        }
+    }
 }
 
 WriteResponse(response) {
