@@ -351,7 +351,6 @@ NavigateAndShowDialog(param) {
         }
         
         prefill_price := walmartProductData.Has("price") ? walmartProductData["price"] : ""
-        prefill_description := walmartProductData.Has("description") ? walmartProductData["description"] : item_description
         prefill_out_of_stock := walmartProductData.Has("outOfStock") ? walmartProductData["outOfStock"] : false
         
     } else {
@@ -382,6 +381,11 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity, pref
     purchaseGui.Add("Text", "xm y+15 w400", "Item: " . item_description)
     
     ; Price field
+    if (prefill_price != "") {
+        try {
+            prefill_price := Format("{:.2f}", prefill_price)
+        }
+    }
     purchaseGui.Add("Text", "xm y+15", "Price (leave blank to skip):")
     priceEdit := purchaseGui.Add("Edit", "w150 r1", prefill_price) ; Use prefill_price
     purchaseGui.Add("Text", "x+5 yp+3", "$")
@@ -390,19 +394,9 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity, pref
     purchaseGui.Add("Text", "xm y+10", "Quantity:")
     quantityEdit := purchaseGui.Add("Edit", "w150 r1", default_quantity)
     
-    ; Subscribable checkbox (auto-detect and set)
-    purchaseGui.Add("Text", "xm y+10", "Subscribable (auto-detected):")
-    subscribableCheckbox := purchaseGui.Add("Checkbox", "xm y+5 w200 h20", "Subscribable")
-    
-    ; New logic for Out of Stock and Subscribable
+    ; New logic for Out of Stock
     if (prefill_out_of_stock) {
         purchaseGui.Add("Text", "xm y+5 w400 cRed", "⚠️ Item is Out of Stock!")
-        ; Set subscribable checkbox to disabled if out of stock
-        subscribableCheckbox.Enabled := false
-        subscribableCheckbox.Value := 0 ; Ensure it's unchecked
-    } else {
-        isSubscribable := DetectSubscribable()
-        subscribableCheckbox.Value := isSubscribable ? 1 : 0
     }
     
     ; Buttons - Override button starts as warning state
@@ -413,7 +407,6 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity, pref
     ; Store references for event handlers
     purchaseGui.priceEdit := priceEdit
     purchaseGui.quantityEdit := quantityEdit
-    purchaseGui.subscribableCheckbox := subscribableCheckbox
     purchaseGui.is_known := is_known
     purchaseGui.item_description := item_description
     
@@ -432,8 +425,7 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity, pref
     global CurrentDialogControls := ""
     
     ; Show dialog immediately (positioned 400px left of center)
-    dialogX := (A_ScreenWidth / 2) - 400 - 200 - 100  ; Center minus 400px minus half dialog width minus 100px
-    purchaseGui.Show("x" . dialogX)
+    purchaseGui.Show("x100")
 
     ; Start purchase detection and price detection immediately
     ; Only start price detection if not pre-filled and not out of stock
@@ -441,7 +433,6 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity, pref
         SetTimer(StartDetectionForPurchaseDialog.Bind(priceEdit), -100)  ; Run once after 100ms delay
     } else if (prefill_out_of_stock) {
         ; If out of stock, disable the Add/Override button visually
-        addButton.Opt("BackgroundLightGray cGray")
         addButton.Enabled := false
     }
 }
@@ -450,7 +441,6 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity, pref
 PurchaseClickHandler(gui) {
     price := Trim(gui.priceEdit.Text)
     quantity := Trim(gui.quantityEdit.Text)
-    subscribable := gui.subscribableCheckbox.Value
     
     ; Validate quantity
     if quantity = "" || !IsNumber(quantity) || Integer(quantity) < 1 {
@@ -484,13 +474,11 @@ PurchaseClickHandler(gui) {
             response_obj["type"] := "purchase_new"
             response_obj["price"] := Float(price)
             response_obj["quantity"] := Integer(quantity)
-            response_obj["subscribable"] := subscribable ? 1 : 0
             response_obj["url"] := current_url
         } else {
             response_obj["type"] := "purchase"
             response_obj["price"] := Float(price)
             response_obj["quantity"] := Integer(quantity)
-            response_obj["subscribable"] := subscribable ? 1 : 0
         }
         WriteResponseJSON(response_obj)
     }
@@ -772,13 +760,23 @@ ShowAddItemDialogHotkey() {
     currentUrl := GetCurrentURLSilent()
     WriteDebug("Current URL captured: " . currentUrl)
     
-    ; Show dialog FIRST with "looking up" placeholder
-    WriteDebug("Showing dialog with lookup placeholder")
-    ShowAddItemDialogWithDefaults("< Looking up... >", currentUrl)
-    
-    ; THEN send lookup request to Ruby (after dialog is created)
-    WriteDebug("Sending lookup request for URL: " . currentUrl)
-    SendLookupRequest(currentUrl)
+    ; Try to get data from browser extension first
+    A_Clipboard := "" ; Clear clipboard before checking
+    walmartProductData := WaitForClipboardJSON(5) ; Wait 5s for extension data
+
+    if (walmartProductData) {
+        WriteDebug("ShowAddItemDialogHotkey: Received product data from clipboard.")
+        prefill_price := walmartProductData.Has("price") ? walmartProductData["price"] : ""
+        prefill_description := walmartProductData.Has("description") ? walmartProductData["description"] : ""
+        
+        ; Show dialog with pre-filled values from clipboard
+        ShowAddItemDialogWithDefaults(prefill_description, currentUrl, prefill_price)
+    } else {
+        WriteDebug("ShowAddItemDialogHotkey: No clipboard data. Falling back to Ruby lookup.")
+        ; Original fallback logic: Show dialog and ask Ruby for info
+        ShowAddItemDialogWithDefaults("< Looking up... >", currentUrl)
+        SendLookupRequest(currentUrl)
+    }
 }
 
 EditPurchaseHotkey() {
@@ -789,7 +787,7 @@ EditPurchaseHotkey() {
     WriteResponseJSON(response_obj)
 }
 
-ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
+ShowAddItemDialogWithDefaults(suggestedName, currentUrl, prefill_price := "") {
     ; Create dialog
     addItemGui := Gui("+AlwaysOnTop", "Add Item & Purchase")
     addItemGui.SetFont("s10")
@@ -814,20 +812,18 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     addItemGui.Add("Text", "xm y+10", "Default Quantity:")
     defaultQuantityEdit := addItemGui.Add("Edit", "w100 r1", "1")
     
-    ; Subscribable checkbox (auto-detect and set)
-    addItemGui.Add("Text", "xm y+10", "Subscribable (auto-detected):")
-    subscribableCheckbox := addItemGui.Add("Checkbox", "xm y+5 w200 h20", "Enable subscription")
-    
-    ; Auto-detect subscribable status and set checkbox
-    isSubscribable := DetectSubscribable()
-    subscribableCheckbox.Value := isSubscribable ? 1 : 0
-    
     ; Separator
     addItemGui.Add("Text", "xm y+15 w400", "────────────── Purchase Info ──────────────")
     
     ; Price field for this purchase
     addItemGui.Add("Text", "xm y+10", "Purchase Price (leave blank to skip purchase):")
-    priceEdit := addItemGui.Add("Edit", "w150 r1")
+    
+    if (prefill_price != "") {
+        try {
+            prefill_price := Format("{:.2f}", prefill_price)
+        }
+    }
+    priceEdit := addItemGui.Add("Edit", "w150 r1", prefill_price)
     addItemGui.Add("Text", "x+5 yp+3", "$")
     
     ; Purchase quantity field
@@ -848,7 +844,6 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     addItemGui.modifierEdit := modifierEdit
     addItemGui.priorityEdit := priorityEdit
     addItemGui.defaultQuantityEdit := defaultQuantityEdit
-    addItemGui.subscribableCheckbox := subscribableCheckbox
     addItemGui.priceEdit := priceEdit
     addItemGui.purchaseQuantityEdit := purchaseQuantityEdit
     addItemGui.currentUrl := currentUrl
@@ -859,7 +854,6 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
         modifierEdit: modifierEdit,
         priorityEdit: priorityEdit,
         defaultQuantityEdit: defaultQuantityEdit,
-        subscribableCheckbox: subscribableCheckbox,
         quantityEdit: purchaseQuantityEdit
     }
     
@@ -891,7 +885,6 @@ AddAndPurchaseClickHandler(gui) {
     modifier := Trim(gui.modifierEdit.Text)
     priority := Trim(gui.priorityEdit.Text)
     defaultQuantity := Trim(gui.defaultQuantityEdit.Text)
-    subscribable := gui.subscribableCheckbox.Value
     price := Trim(gui.priceEdit.Text)
     purchaseQuantity := Trim(gui.purchaseQuantityEdit.Text)
     
@@ -950,7 +943,6 @@ AddAndPurchaseClickHandler(gui) {
     response_obj["modifier"] := modifier
     response_obj["priority"] := Integer(priority)
     response_obj["default_quantity"] := Integer(defaultQuantity)
-    response_obj["subscribable"] := subscribable ? 1 : 0
     response_obj["url"] := currentUrl
     response_obj["price"] := price != "" ? Float(price) : ""
     response_obj["purchase_quantity"] := Integer(purchaseQuantity)
@@ -969,7 +961,6 @@ AddOnlyClickHandler(gui) {
     modifier := Trim(gui.modifierEdit.Text)
     priority := Trim(gui.priorityEdit.Text)
     defaultQuantity := Trim(gui.defaultQuantityEdit.Text)
-    subscribable := gui.subscribableCheckbox.Value
     
     ; Validate description (required for Add Only)
     if description = "" {
@@ -1011,7 +1002,6 @@ AddOnlyClickHandler(gui) {
     response_obj["modifier"] := modifier
     response_obj["priority"] := Integer(priority)
     response_obj["default_quantity"] := Integer(defaultQuantity)
-    response_obj["subscribable"] := subscribable ? 1 : 0
     response_obj["url"] := currentUrl
     response_obj["price"] := "" ; Empty price indicates "add only"
     response_obj["purchase_quantity"] := 0
@@ -1314,7 +1304,11 @@ CheckForPrice() {
         FileAppend("SUCCESS: Price detected '" . price . "' - OCR took " . ocrDuration . "ms on this iteration - filling in field`n", "command_debug.txt")
         
         ; Fill in the price field
-        CurrentPriceEdit.Text := price
+        try {
+            CurrentPriceEdit.Text := Format("{:.2f}", price)
+        } catch {
+            CurrentPriceEdit.Text := price
+        }
         
         ; Stop detection since we found a price
         StopPriceDetection()
@@ -1651,7 +1645,6 @@ ProcessLookupResult(jsonParam) {
             CurrentDialogControls.modifierEdit.Text := lookupData["modifier"]
             CurrentDialogControls.priorityEdit.Text := lookupData["priority"]
             CurrentDialogControls.defaultQuantityEdit.Text := lookupData["default_quantity"]
-            CurrentDialogControls.subscribableCheckbox.Value := lookupData["subscribable"] ? 1 : 0
             CurrentDialogControls.quantityEdit.Text := lookupData["default_quantity"]
             
             WriteDebug("After update, description field text: '" . CurrentDialogControls.descriptionEdit.Text . "'")
