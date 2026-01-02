@@ -111,7 +111,11 @@ class WalmartDatabase
   end
 
   def find_purchase_by_id(purchase_id)
-    @purchases.where(id: purchase_id).first
+    @purchases
+      .join(:items, prod_id: :prod_id)
+      .where(Sequel[:purchases][:id] => purchase_id)
+      .select(Sequel[:purchases].*, Sequel[:items][:description].as(:item_description))
+      .first
   end
 
   def update_purchase(purchase_id, updates)
@@ -123,7 +127,7 @@ class WalmartDatabase
   end
 
   def find_purchases(search_term: nil, start_date: nil, end_date: nil, limit: 20)
-    query = @purchases.join(@items, prod_id: :prod_id)
+    query = @purchases.join(:items, prod_id: :prod_id)
 
     if search_term && !search_term.empty?
       # Search by prod_id or item description

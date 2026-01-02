@@ -107,7 +107,7 @@ ShowPersistentStatus("Processing shopping list")
 ; Main loop - check for commands every 500ms
 Loop {
     if FileExist(CommandFile) {
-        command := FileRead(CommandFile)
+        command := FileRead(CommandFile, "UTF-8")
         ProcessCommand(command)
         if FileExist(CommandFile)
             FileDelete(CommandFile)
@@ -599,7 +599,7 @@ WriteResponseJSON(response_obj) {
     try {
         if FileExist(ResponseFile)
             FileDelete(ResponseFile)
-        FileAppend(json_response, ResponseFile)
+        FileAppend(json_response, ResponseFile, "UTF-8-RAW")
     } catch as e {
         ; Fallback error handling
         if FileExist(ResponseFile)
@@ -646,7 +646,7 @@ WriteResponse(response) {
         if FileExist(ResponseFile)
             FileDelete(ResponseFile)
         ; Write response as plain text
-        FileAppend(response, ResponseFile)
+        FileAppend(response, ResponseFile, "UTF-8-RAW")
     } catch as e {
         ; If file operations fail, try one more time
         try {
@@ -1364,7 +1364,11 @@ ShowPurchaseSelectionDialogAHK(jsonParam) {
 
             display_text := Format("{} - {}x ${} on {}", itemDesc, quantity, price, purchaseDate)
             selectionGui.Add("Text", "xm " . yPos . " w300", display_text)
-            selectionGui.Add("Button", "x+5 w80 h25", "Select").OnEvent("Click", (*) => SelectPurchaseClickHandler(selectionGui, purchase["id"]))
+            
+            btn := selectionGui.Add("Button", "x+5 w80 h25", "Select")
+            btn.purchaseId := purchase["id"]
+            btn.OnEvent("Click", SelectPurchase_OnClick)
+
             yPos := "y+5"
         }
     } else {
@@ -1376,6 +1380,11 @@ ShowPurchaseSelectionDialogAHK(jsonParam) {
     selectionGui.OnEvent("Close", (*) => CancelSelectionClickHandler(selectionGui))
 
     selectionGui.Show("x" . (A_ScreenWidth / 2 - 250) . " y" . (A_ScreenHeight / 2 - 200))
+}
+
+SelectPurchase_OnClick(btn, info) {
+    id := btn.purchaseId
+    SelectPurchaseClickHandler(btn.Gui, id)
 }
 
 ShowEditablePurchaseDialogAHK(jsonParam) {
@@ -1408,7 +1417,11 @@ ShowEditablePurchaseDialogAHK(jsonParam) {
         deleteButton := editGui.Add("Button", "x+10 w100 h30 BackgroundRed cWhite", "Delete")
     }
 
-    saveButton.OnEvent("Click", (*) => SavePurchaseClickHandler(editGui, purchaseData, isNewPurchase, prodIdEdit, quantityEdit, priceEdit, purchaseDateEdit))
+    if isNewPurchase {
+        saveButton.OnEvent("Click", (*) => AddNewPurchaseHandler(editGui, prodIdEdit, quantityEdit, priceEdit, purchaseDateEdit))
+    } else {
+        saveButton.OnEvent("Click", (*) => UpdatePurchaseHandler(editGui, purchaseData, quantityEdit, priceEdit, purchaseDateEdit))
+    }
     cancelButton.OnEvent("Click", (*) => CancelEditClickHandler(editGui))
     if !isNewPurchase {
         deleteButton.OnEvent("Click", (*) => DeletePurchaseClickHandler(editGui, purchaseData["id"]))
@@ -1418,7 +1431,7 @@ ShowEditablePurchaseDialogAHK(jsonParam) {
     editGui.Show("x" . (A_ScreenWidth / 2 - 200) . " y" . (A_ScreenHeight / 2 - 250))
 }
 
-SavePurchaseClickHandler(gui, originalPurchaseData, isNewPurchase, prodIdEdit, quantityEdit, priceEdit, purchaseDateEdit) {
+UpdatePurchaseHandler(gui, originalPurchaseData, quantityEdit, priceEdit, purchaseDateEdit) {
     response_obj := Map()
     newQuantity := Trim(quantityEdit.Text)
     newPrice := Trim(priceEdit.Text)
@@ -1438,18 +1451,43 @@ SavePurchaseClickHandler(gui, originalPurchaseData, isNewPurchase, prodIdEdit, q
         return
     }
 
-    if isNewPurchase {
-        newProdId := Trim(prodIdEdit.Text)
-        if newProdId = "" {
-            MsgBox("Product ID is required for a new purchase.")
-            return
-        }
-        response_obj["type"] := "purchase_added"
-        response_obj["prod_id"] := newProdId
-    } else {
-        response_obj["type"] := "purchase_updated"
-        response_obj["purchase_id"] := originalPurchaseData["id"]
+    response_obj["type"] := "purchase_updated"
+    response_obj["purchase_id"] := originalPurchaseData["id"]
+    response_obj["quantity"] := Integer(newQuantity)
+    response_obj["price"] := Float(newPrice)
+    response_obj["purchase_date"] := newPurchaseDate
+
+    WriteResponseJSON(response_obj)
+    gui.Destroy()
+}
+
+AddNewPurchaseHandler(gui, prodIdEdit, quantityEdit, priceEdit, purchaseDateEdit) {
+    response_obj := Map()
+    newQuantity := Trim(quantityEdit.Text)
+    newPrice := Trim(priceEdit.Text)
+    newPurchaseDate := Trim(purchaseDateEdit.Text)
+
+    ; Basic validation
+    if !IsNumber(newQuantity) || Integer(newQuantity) < 1 {
+        MsgBox("Please enter a valid quantity (number > 0).")
+        return
     }
+    if !IsNumber(newPrice) || Float(newPrice) < 0 {
+        MsgBox("Please enter a valid price (number >= 0).")
+        return
+    }
+    if !RegExMatch(newPurchaseDate, "^\d{4}-\d{2}-\d{2}$") {
+        MsgBox("Please enter a valid date in YYYY-MM-DD format.")
+        return
+    }
+
+    newProdId := Trim(prodIdEdit.Text)
+    if newProdId = "" {
+        MsgBox("Product ID is required for a new purchase.")
+        return
+    }
+    response_obj["type"] := "purchase_added"
+    response_obj["prod_id"] := newProdId
     response_obj["quantity"] := Integer(newQuantity)
     response_obj["price"] := Float(newPrice)
     response_obj["purchase_date"] := newPurchaseDate
@@ -1470,6 +1508,41 @@ DeletePurchaseClickHandler(gui, purchaseId) {
 }
 
 CancelEditClickHandler(gui) {
+    SendStatus("cancelled")
+    gui.Destroy()
+}
+
+FindPurchasesClickHandler(gui, searchTermEdit, startDateEdit, endDateEdit) {
+    response_obj := Map()
+    response_obj["type"] := "search_purchases"
+    response_obj["search_term"] := Trim(searchTermEdit.Text)
+    response_obj["start_date"] := Trim(startDateEdit.Text)
+    response_obj["end_date"] := Trim(endDateEdit.Text)
+    WriteResponseJSON(response_obj)
+    gui.Destroy()
+}
+
+CancelSearchClickHandler(gui) {
+    SendStatus("cancelled")
+    gui.Destroy()
+}
+
+SelectPurchaseClickHandler(gui, purchaseId) {
+    response_obj := Map()
+    response_obj["type"] := "purchase_selected"
+    response_obj["purchase_id"] := purchaseId
+    WriteResponseJSON(response_obj)
+    gui.Destroy()
+}
+
+NewPurchaseClickHandler(gui) {
+    response_obj := Map()
+    response_obj["type"] := "new_purchase"
+    WriteResponseJSON(response_obj)
+    gui.Destroy()
+}
+
+CancelSelectionClickHandler(gui) {
     SendStatus("cancelled")
     gui.Destroy()
 }

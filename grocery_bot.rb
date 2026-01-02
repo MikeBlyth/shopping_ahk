@@ -1332,8 +1332,6 @@ class WalmartGroceryAssistant
     end
   end
 
-  private
-
   def handle_edit_purchase_workflow(response)
     @logger.debug("handle_edit_purchase_workflow called with: #{response.inspect}")
 
@@ -1350,18 +1348,14 @@ class WalmartGroceryAssistant
     start_date_str = parsed_search_response[:start_date]
     end_date_str = parsed_search_response[:end_date]
 
-    start_date = start_date_str ? Date.parse(start_date_str) : nil rescue nil
-    end_date = end_date_str ? Date.parse(end_date_str) : nil rescue nil
+    start_date = start_date_str && !start_date_str.empty? ? Date.parse(start_date_str) : nil rescue nil
+    end_date = end_date_str && !end_date_str.empty? ? Date.parse(end_date_str) : nil rescue nil
 
     @logger.debug("Search parameters: term='#{search_term}', start_date='#{start_date}', end_date='#{end_date}'")
 
     # 2. Query the database
     purchases = @db.find_purchases(search_term: search_term, start_date: start_date, end_date: end_date, limit: 50)
 
-    if purchases.empty?
-      @ahk.show_message("No purchases found matching your criteria.")
-      return
-    end
 
     # 3. Send search results to AHK for selection
     selection_response = @ahk.show_purchase_selection_dialog(purchases)
@@ -1393,8 +1387,6 @@ class WalmartGroceryAssistant
       @ahk.show_message("No purchase selected or new purchase requested.")
     end
   end
-
-  private
 
   def handle_editable_purchase_response(response, original_purchase)
     parsed_response = parse_response(response)
@@ -1445,8 +1437,7 @@ class WalmartGroceryAssistant
       @ahk.show_message("Unexpected response from editable purchase dialog.")
     end
   end
-
-  def setup_cleanup_handlers
+end
 
 if __FILE__ == $0
   assistant = WalmartGroceryAssistant.new
