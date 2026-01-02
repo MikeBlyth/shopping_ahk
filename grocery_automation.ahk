@@ -392,7 +392,7 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity) {
     global CurrentDialogControls := ""
     
     ; Show dialog immediately (positioned 400px left of center)
-    dialogX := (A_ScreenWidth / 2) - 400 - 200  ; Center minus 400px minus half dialog width
+    dialogX := (A_ScreenWidth / 2) - 400 - 200 - 100  ; Center minus 400px minus half dialog width minus 100px
     purchaseGui.Show("x" . dialogX)
 
     ; Start purchase detection and price detection immediately
@@ -800,7 +800,7 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl) {
     
     ; Show dialog immediately (positioned 400px left of center)
     dialogX := (A_ScreenWidth / 2) - 400 - 250  ; Center minus 400px minus half dialog width
-    dialogX := 600 ; Center minus 400px minus half dialog width
+    dialogX := 100 ; Center minus 400px minus half dialog width
     addItemGui.Show("x" . dialogX)
 
     ; Start purchase detection and price detection immediately
