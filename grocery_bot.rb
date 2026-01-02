@@ -983,6 +983,8 @@ class WalmartGroceryAssistant
 
     # Process purchase response
     case parsed_response[:type]
+    when 'out_of_stock_alternatives'
+      return handle_out_of_stock(item_name, db_item)
     when 'purchase'
       # Mark as purchased and update shopping list with itemid and total price
       total_price = parsed_response[:price].to_f * parsed_response[:quantity].to_i
@@ -1033,6 +1035,62 @@ class WalmartGroceryAssistant
     end
     
     return parsed_response
+  end
+
+  def handle_out_of_stock(original_item_name, original_db_item)
+    @logger.info("Item '#{original_item_name}' is out of stock. Finding alternatives...")
+
+    # 1. Find all items with the same base description
+    alternatives = @db.get_all_items_by_priority.select do |item|
+      item[:description].casecmp?(original_db_item[:description])
+    end
+
+    # 2. Remove the item that we know is out of stock
+    alternatives.reject! { |alt| alt[:prod_id] == original_db_item[:prod_id] }
+    
+    # 3. Explicitly re-sort the filtered list by priority (ascending)
+    alternatives.sort_by! { |item| normalize_priority(item[:priority]) }
+
+    if alternatives.empty?
+      @ahk.show_message("Original item is out of stock and no database alternatives were found for '#{original_item_name}'.")
+      update_shopping_list_item(original_item_name, purchased: '❌', itemno: original_db_item[:prod_id], price: 0.0)
+      puts "⏭️ Item '#{original_item_name}' marked as skipped due to no alternatives."
+      return nil
+    end
+
+    # Prepare a more descriptive title
+    original_full_description = [original_db_item[:description], original_db_item[:modifier]].compact.join(' ').strip
+    title = "'#{original_full_description}' is out of stock, choose from these alternatives:"
+
+    # Prepare options for AHK using the modifier as the description
+    match_options = alternatives.map do |item|
+      display_text = item[:modifier]&.strip&.empty? ? item[:description] : item[:modifier]
+      "#{display_text} (Priority: #{item[:priority] || 'N/A'})"
+    end
+    match_options << "Search for new item on Walmart.com"
+
+    # Show choice dialog
+    selection = @ahk.show_multiple_choice(
+      title: title,
+      options: match_options,
+      allow_skip: true
+    )
+
+    return nil if selection.nil? # User skipped
+
+    if selection > 0 && selection <= alternatives.length
+      # User chose an alternative
+      chosen_item = alternatives[selection - 1]
+      @logger.info("User selected alternative: '#{chosen_item[:description]}'. Navigating...")
+      # Recurse, passing the original shopping list name but the new item's data
+      return navigate_and_show_dialog_for_known_item(original_item_name, chosen_item)
+    elsif selection == alternatives.length + 1
+      # User chose to search
+      @logger.info("User chose to search for a new item.")
+      return :search_new_item
+    end
+
+    nil # No valid selection
   end
 
   def handle_user_interaction(item_name, db_item = nil)

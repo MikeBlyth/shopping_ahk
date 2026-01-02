@@ -352,6 +352,17 @@ NavigateAndShowDialog(param) {
         
         prefill_price := walmartProductData.Has("price") ? walmartProductData["price"] : ""
         prefill_out_of_stock := walmartProductData.Has("outOfStock") ? walmartProductData["outOfStock"] : false
+
+        if (prefill_out_of_stock) {
+            WriteDebug("Item is out of stock. Requesting alternatives from Ruby for item: " . item_name)
+            
+            response_obj := Map()
+            response_obj["type"] := "out_of_stock_alternatives"
+            response_obj["item_name"] := item_name
+            WriteResponseJSON(response_obj)
+            
+            return ; Stop processing and do not show a dialog
+        }
         
     } else {
         FileAppend("NavigateAndShowDialog: No valid Walmart product data received from clipboard within timeout. Showing dialog with default values.`n", "command_debug.txt")
