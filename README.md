@@ -10,6 +10,7 @@ Automate grocery shopping navigation on Walmart.com using AutoHotkey for browser
 - For each item:
   - **Known items**: Opens saved Walmart URL, waits for you to add to cart
   - **New items**: Searches Walmart, lets you find the product, saves URL for future
+  - **Out-of-Stock Handling**: If a known item is out-of-stock, presents database alternatives for selection.
 - Tracks purchase history in PostgreSQL database
 - Uses AutoHotkey for reliable browser automation (no bot detection)
 - You handle login, cart management, and checkout manually
@@ -18,7 +19,8 @@ Automate grocery shopping navigation on Walmart.com using AutoHotkey for browser
 
 **Windows-native approach:**
 - Ruby script for data management (Google Sheets, database, logic)
-- AutoHotkey (AHK) script for browser automation
+- AutoHotkey (AHK) script for browser automation and UI
+- Browser Extension for reliable data extraction from Walmart.com
 - PostgreSQL database for item URLs and purchase history
 - Your regular Windows browser (Chrome, Edge, Firefox)
 - Google Sheets API for grocery list management
@@ -138,20 +140,21 @@ ruby grocery_bot.rb
 
 ## How AutoHotkey Integration Works
 
-The Ruby script communicates with AutoHotkey via temporary files:
+The Ruby script communicates with AutoHotkey via temporary files, primarily using JSON:
 
 **Ruby → AHK:**
-- Writes commands to `ahk_command.txt`
+- Writes pipe-delimited commands to `ahk_command.txt`
 - Commands: `OPEN_URL|https://walmart.com/ip/123`, `SEARCH|frozen peas`
 
 **AHK → Ruby:**
-- Writes status to `ahk_status.txt` 
-- Status: `READY`, `NAVIGATING`, `WAITING_FOR_USER`
+- Writes JSON responses to `ahk_response.txt`
+- Responses include a `type` (e.g., `status`, `purchase`, `choice`) and a `value` (e.g., `ready`, `skipped`). This unified JSON channel handles all communication back to Ruby.
 
-**AHK Script Functions:**
+**AHK Script Functions (Key Examples):**
 - `OpenWalmartURL(url)` - Navigate to product page
 - `SearchWalmart(term)` - Search for new items
-- `WaitForUserAction()` - Pause for manual cart management
+- `ShowItemPrompt(...)` - Display a dialog for item processing
+- `ShowMultipleChoice(...)` - Display a list of options for user selection
 - `GetCurrentURL()` - Return current page URL for saving
 
 ## Safety Features

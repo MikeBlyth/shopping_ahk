@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS items (
     url TEXT NOT NULL,                       -- Full Walmart product URL
     description TEXT NOT NULL,               -- Item description/name
     modifier TEXT,                           -- Size, brand, or other modifier
+    category TEXT,                           -- User-defined category (e.g., Dairy, Produce)
     default_quantity INTEGER DEFAULT 1,      -- Default quantity to purchase
     priority INTEGER DEFAULT 0,              -- Shopping priority (higher = more important)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

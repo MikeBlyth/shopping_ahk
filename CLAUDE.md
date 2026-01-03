@@ -55,6 +55,7 @@
 - ✅ **Persistent status**: Always shows what's available (Ctrl+Shift+A, Ctrl+Shift+Q)
 - ✅ **Flexible workflow**: Mix automated shopping with manual additions
 - ✅ **Crash safe**: System handles crashes gracefully, no orphaned processes
+- ✅ **Out-of-Stock Handling**: Automatically presents database alternatives when an item is out of stock.
 
 ## Browser Compatibility
 - System works with any browser setup (tested with Edge "Baseline" group)
@@ -106,6 +107,17 @@ When a shopping list item matches an existing database item, the app opens that 
 - User navigates to preferred alternative and presses **Ctrl+Shift+A** to complete
 - **Key improvement**: Updates the original shopping list item as purchased (not a separate item)
 - **Simplified workflow**: No new commands needed, uses existing hotkey pattern
+
+### Out-of-Stock Alternative Selection ✅
+
+When a shopping list item is found to be out-of-stock on the Walmart website, the system now provides an automated way to select a replacement.
+
+**Workflow:**
+1.  When the browser extension reports an item is out of stock, the standard purchase dialog is suppressed.
+2.  The script automatically searches the database for all other items with the same base name (e.g., other types of "Cottage Cheese").
+3.  A dialog appears, listing the available alternatives, sorted by priority. The list displays the item's `modifier` (e.g., "Low-fat" or "With Pineapple") for easy differentiation.
+4.  The user can select a suitable alternative from the list, choose to search for a completely new item, or skip.
+5.  If an alternative is chosen, the script navigates to that item's page and shows the purchase dialog to complete the process. The purchase is correctly logged against the *original* shopping list item.
 
 ## Simplified Hotkey System - IMPLEMENTED ✅
 

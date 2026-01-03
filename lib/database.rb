@@ -44,7 +44,7 @@ class WalmartDatabase
     @items.where(Sequel.ilike(:description, "%#{description}%")).order(:priority, :description).all
   end
 
-  def create_item(prod_id:, url:, description:, modifier: nil, default_quantity: 1, priority: 1, subscribable: 0)
+  def create_item(prod_id:, url:, description:, modifier: nil, default_quantity: 1, priority: 1, subscribable: 0, category: nil)
     # Normalize priority: treat nil or empty as 1 (highest priority)
     normalized_priority = (priority.nil? || priority == '') ? 1 : priority
     
@@ -55,7 +55,8 @@ class WalmartDatabase
       modifier: modifier,
       default_quantity: default_quantity,
       priority: normalized_priority,
-      subscribable: subscribable
+      subscribable: subscribable,
+      category: category
     )
   end
 
@@ -183,6 +184,50 @@ class WalmartDatabase
     )
   end
 
+  def units_ordered_per_week(prod_id)
+    # Get all purchases for the item
+    purchases = @purchases.where(prod_id: prod_id).all
+    return 0 if purchases.empty?
+
+    # Get the earliest purchase date from the entire database
+    earliest_db_purchase_date = get_earliest_purchase_date
+    return 0 if earliest_db_purchase_date.nil?
+
+    # Calculate the total number of weeks since the start of the database
+    weeks_since_db_start = (Date.today - earliest_db_purchase_date).to_f / 7
+    weeks_since_db_start = 1 if weeks_since_db_start < 1 # Avoid division by zero and ensure at least 1 week
+
+    # Calculate the total quantity ordered for this item
+    total_quantity = purchases.sum { |p| p[:quantity] }
+
+    # Calculate the average units per week based on weeks since database start
+    (total_quantity / weeks_since_db_start).round(2)
+  end
+
+  def average_cost_per_month(prod_id)
+    # Get all purchases for the item
+    purchases = @purchases.where(prod_id: prod_id).all
+    return 0 if purchases.empty?
+
+    # Get the earliest purchase date from the entire database
+    earliest_db_purchase_date = get_earliest_purchase_date
+    return 0 if earliest_db_purchase_date.nil?
+
+    # Calculate the total number of days since the start of the database
+    days_since_db_start = (Date.today - earliest_db_purchase_date).to_i
+    
+    # Convert days to months (approximately)
+    # Using 30.44 as the average number of days in a month (365.25 / 12)
+    months_since_db_start = days_since_db_start.to_f / 30.44
+    months_since_db_start = 1 if months_since_db_start < 1 # Avoid division by zero and ensure at least 1 month
+
+    # Calculate total cost for this item
+    total_cost_cents = purchases.sum { |p| (p[:price_cents] || 0) * p[:quantity] }
+
+    # Calculate the average cost per month
+    (total_cost_cents / (100.0 * months_since_db_start)).round(2)
+  end
+
   def test_connection
     begin
       @db.test_connection
@@ -268,6 +313,13 @@ class WalmartDatabase
   end
 
   private
+  
+  # Helper to get the earliest purchase date from the entire database
+  def get_earliest_purchase_date
+    # Find the minimum purchase_date across all purchases
+    min_date = @purchases.min(:purchase_date)
+    min_date
+  end
   
   def get_db_config
     database_url = ENV['DATABASE_URL']
