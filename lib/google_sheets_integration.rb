@@ -302,7 +302,6 @@ module GoogleSheetsIntegration
           end
 
           updates[:description] = item[:item] unless item[:item].empty?
-          updates[:url] = item[:url] unless item[:url].empty?
           updates[:modifier] = item[:modifier] unless item[:modifier].empty?
           updates[:category] = item[:category] unless item[:category].empty?
           updates[:priority] = item[:priority]
@@ -316,7 +315,6 @@ module GoogleSheetsIntegration
           # Create new item
           database.create_item(
             prod_id: prod_id,
-            url: item[:url],
             description: item[:item],
             modifier: item[:modifier],
             default_quantity: item[:quantity] || 1,
@@ -330,7 +328,8 @@ module GoogleSheetsIntegration
       end
       
       # Deactivate items that are in the DB but are no longer on the sheet
-      deactivated_count = database.deactivate_missing_items(sheet_prod_ids)
+      deactivated_count = 0
+      deactivated_count = database.deactivate_missing_items(sheet_prod_ids) if items.any?
 
       puts "✅ Sync complete: #{synced_count} new, #{updated_count} updated, #{reactivated_count} reactivated, #{deactivated_count} deactivated."
       { new: synced_count, updated: updated_count, reactivated: reactivated_count, deactivated: deactivated_count }
@@ -366,8 +365,9 @@ module GoogleSheetsIntegration
         # Display subscribable as green check for 1, blank for 0
         priority_display = db_item[:priority] == 1 ? '' : db_item[:priority].to_s
         subscribable_display = db_item[:subscribable] == 1 ? '✅' : ''
+        url = database.construct_url_from_prod_id(db_item[:prod_id])
         row = ['', db_item[:description], db_item[:modifier] || '', priority_display, '', last_purchased,
-               db_item[:prod_id], db_item[:url], subscribable_display, db_item[:category] || '', units_per_week, avg_cost_per_month]
+               db_item[:prod_id], url, subscribable_display, db_item[:category] || '', units_per_week, avg_cost_per_month]
 
         all_rows << row
       end

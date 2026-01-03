@@ -1,17 +1,17 @@
 -- Walmart Grocery Database Schema
 -- Created for tracking grocery items and purchase history
 
--- Items table: stores grocery item details and URLs
+-- Items table: stores grocery item details
 CREATE TABLE IF NOT EXISTS items (
     id SERIAL PRIMARY KEY,
     prod_id VARCHAR(50) UNIQUE NOT NULL,     -- Extracted from Walmart URL
-    url TEXT NOT NULL,                       -- Full Walmart product URL
     description TEXT NOT NULL,               -- Item description/name
     modifier TEXT,                           -- Size, brand, or other modifier
     category TEXT,                           -- User-defined category (e.g., Dairy, Produce)
     status VARCHAR(20) NOT NULL DEFAULT 'active', -- 'active', 'inactive'
     default_quantity INTEGER DEFAULT 1,      -- Default quantity to purchase
     priority INTEGER DEFAULT 0,              -- Shopping priority (higher = more important)
+    subscribable SMALLINT DEFAULT 0,         -- Whether item supports subscription ordering (0=no, 1=yes)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -49,9 +49,9 @@ CREATE TRIGGER update_items_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- Sample data for testing (optional)
-INSERT INTO items (prod_id, url, description, modifier, default_quantity, priority, status) 
+INSERT INTO items (prod_id, description, modifier, default_quantity, priority, status) 
 VALUES 
-    ('123456789', 'https://www.walmart.com/ip/Great-Value-2-Milk-1-Gallon/123456789', '2% Milk', '1 Gallon', 1, 9, 'active'),
-    ('987654321', 'https://www.walmart.com/ip/Wonder-Bread-Classic-White/987654321', 'White Bread', 'Classic', 1, 8, 'active'),
-    ('555666777', 'https://www.walmart.com/ip/Large-Eggs-Dozen/555666777', 'Large Eggs', 'Dozen', 1, 7, 'active')
+    ('123456789', '2% Milk', '1 Gallon', 1, 9, 'active'),
+    ('987654321', 'White Bread', 'Classic', 1, 8, 'active'),
+    ('555666777', 'Large Eggs', 'Dozen', 1, 7, 'active')
 ON CONFLICT (prod_id) DO NOTHING;

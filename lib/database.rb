@@ -44,13 +44,12 @@ class WalmartDatabase
     @items.where(Sequel.ilike(:description, "%#{description}%")).order(:priority, :description).all
   end
 
-  def create_item(prod_id:, url:, description:, modifier: nil, default_quantity: 1, priority: 1, subscribable: 0, category: nil, status: 'active')
+  def create_item(prod_id:, description:, modifier: nil, default_quantity: 1, priority: 1, subscribable: 0, category: nil, status: 'active')
     # Normalize priority: treat nil or empty as 1 (highest priority)
     normalized_priority = (priority.nil? || priority == '') ? 1 : priority
     
     @items.insert(
       prod_id: prod_id,
-      url: url,
       description: description,
       modifier: modifier,
       default_quantity: default_quantity,
@@ -184,6 +183,10 @@ class WalmartDatabase
     # Extract at least 4 digits before '?' or end of string
     match = url.match(/\/ip\/[^\/]+\/(\d{4,})(?:\?|$)/)
     match ? match[1] : nil
+  end
+
+  def construct_url_from_prod_id(prod_id)
+    "https://www.walmart.com/ip/#{prod_id}"
   end
 
   def get_item_with_purchase_stats(prod_id)

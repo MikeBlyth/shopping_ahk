@@ -448,7 +448,8 @@ class WalmartGroceryAssistant
   end
 
   def navigate_to_known_item(item)
-    @ahk.open_url(item[:url])
+    url = @db.construct_url_from_prod_id(item[:prod_id])
+    @ahk.open_url(url)
     # No sleep - let dialog show immediately while page loads
   end
 
@@ -600,7 +601,6 @@ class WalmartGroceryAssistant
             # Create new item
             @db.create_item(
               prod_id: prod_id,
-              url: url,
               description: description,
               modifier: modifier.empty? ? nil : modifier,
               default_quantity: default_quantity,
@@ -768,7 +768,6 @@ class WalmartGroceryAssistant
     begin
       @db.create_item(
         prod_id: prod_id,
-        url: url,
         description: description,
         modifier: modifier.empty? ? nil : modifier,
         default_quantity: default_quantity,
@@ -815,7 +814,6 @@ class WalmartGroceryAssistant
     # Return the newly created item data (for consistency, though not used in the new flow)
     {
       prod_id: prod_id,
-      url: url,
       description: description,
       modifier: modifier.empty? ? nil : modifier,
       default_quantity: default_quantity,
@@ -916,7 +914,6 @@ class WalmartGroceryAssistant
     begin
       @db.create_item(
         prod_id: prod_id,
-        url: url,
         description: description,
         modifier: modifier.empty? ? nil : modifier,
         default_quantity: default_quantity,
@@ -945,7 +942,6 @@ class WalmartGroceryAssistant
 
       {
         prod_id: prod_id,
-        url: url,
         description: description,
         modifier: modifier.empty? ? nil : modifier,
         default_quantity: default_quantity,
@@ -960,7 +956,7 @@ class WalmartGroceryAssistant
   def navigate_and_show_dialog_for_known_item(item_name, db_item)
     # Use combined command that navigates and shows dialog in one step
     display_name = db_item[:description]
-    url = db_item[:url]
+    url = @db.construct_url_from_prod_id(db_item[:prod_id])
     description = "Priority: #{db_item[:priority]}, Default Qty: #{db_item[:default_quantity]}"
 
     response = @ahk.navigate_and_show_dialog(
@@ -1100,7 +1096,7 @@ class WalmartGroceryAssistant
     if db_item
       # Known item - use db_item description for display, but keep original name for shopping list
       display_name = db_item[:description]
-      url = db_item[:url]
+      url = @db.construct_url_from_prod_id(db_item[:prod_id])
       description = "Priority: #{db_item[:priority]}, Default Qty: #{db_item[:default_quantity]}"
 
       response = @ahk.show_item_prompt(
@@ -1182,7 +1178,6 @@ class WalmartGroceryAssistant
           subscribable = (parsed_response[:subscribable] || 0).to_i
           @db.create_item(
             prod_id: prod_id,
-            url: captured_url,
             description: original_shopping_item_name,
             modifier: nil,
             default_quantity: 1,
@@ -1250,15 +1245,11 @@ class WalmartGroceryAssistant
       if prod_id
         @db.create_item(
           prod_id: prod_id,
-          url: current_url,
           description: item_name,
           modifier: nil,
           default_quantity: 1,
           priority: 5
         )
-
-        # Update Google Sheets with URL
-        @sheets_sync.update_item_url(item_name, current_url) if @sheets_sync
 
         @ahk.show_message("✅ Saved item: #{item_name}\n\nURL: #{current_url}")
       else
@@ -1324,7 +1315,6 @@ class WalmartGroceryAssistant
         quantity: 1,
         last_purchased: '',
         itemno: '',
-        url: '',
         price: '',
         purchased_quantity: 0
       }
@@ -1484,7 +1474,7 @@ class WalmartGroceryAssistant
       if prod_id && !prod_id.empty?
         # Check if item exists, if not, create a minimal one
         unless @db.find_item_by_prod_id(prod_id)
-          @db.create_item(prod_id: prod_id, url: "", description: "Unknown Item (from manual purchase)", default_quantity: 1, priority: 5)
+          @db.create_item(prod_id: prod_id, description: "Unknown Item (from manual purchase)", default_quantity: 1, priority: 5)
         end
         @db.record_purchase(prod_id: prod_id, quantity: quantity, price_cents: price_cents, purchase_date: purchase_date)
         @ahk.show_message("New purchase added successfully for Prod ID: #{prod_id}.")

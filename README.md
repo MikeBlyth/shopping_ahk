@@ -8,11 +8,12 @@ Automate grocery shopping navigation on Walmart.com using AutoHotkey for browser
 
 - Reads grocery list from Google Sheets
 - For each item:
-  - **Known items**: Opens saved Walmart URL, waits for you to add to cart
-  - **New items**: Searches Walmart, lets you find the product, saves URL for future
+  - **Known items**: Constructs URL from product ID, opens Walmart URL, waits for you to add to cart
+  - **New items**: Searches Walmart, lets you find the product, saves product ID for future
   - **Out-of-Stock Handling**: If a known item is out-of-stock, presents database alternatives for selection.
 - Tracks purchase history in PostgreSQL database
 - Uses AutoHotkey for reliable browser automation (no bot detection)
+- **Improved Google Sheets Sync**: Prevents incorrect deactivation of items when the sheet is empty, ensuring your database stays accurate.
 - You handle login, cart management, and checkout manually
 
 ## Technical Architecture
@@ -169,21 +170,20 @@ The Ruby script communicates with AutoHotkey via temporary files, primarily usin
 ## Google Sheets Format
 
 Your grocery sheet should have these columns:
-- **A**: item (name/description)  
-- **B**: url (Walmart product URL - populated by bot)
-- **C**: itemno (product ID - extracted by bot)
-- **D**: quantity (default quantity to buy)
-- **E**: last purchased (date - updated by bot)
-- **F**: prev (previous purchase date)
+- **A**: item (name/description)
+- **B**: itemno (product ID - extracted by bot)
+- **C**: quantity (default quantity to buy)
+- **D**: last purchased (date - updated by bot)
+- **E**: prev (previous purchase date)
 
 ## Database Schema
 
 **items table:**
 - prod_id (VARCHAR) - Walmart product ID
-- url (TEXT) - Full Walmart product URL
 - description (TEXT) - Item name/description
 - default_quantity (INTEGER) - Default amount to buy
 - priority (INTEGER) - Shopping priority
+- subscribable (SMALLINT) - Whether item supports subscription ordering (0=no, 1=yes)
 - created_at, updated_at (TIMESTAMP)
 
 **purchases table:**
