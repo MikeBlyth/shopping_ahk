@@ -44,7 +44,7 @@ class WalmartDatabase
     @items.where(Sequel.ilike(:description, "%#{description}%")).order(:priority, :description).all
   end
 
-  def create_item(prod_id:, url:, description:, modifier: nil, default_quantity: 1, priority: 1, subscribable: 0, category: nil)
+  def create_item(prod_id:, url:, description:, modifier: nil, default_quantity: 1, priority: 1, subscribable: 0, category: nil, status: 'active')
     # Normalize priority: treat nil or empty as 1 (highest priority)
     normalized_priority = (priority.nil? || priority == '') ? 1 : priority
     
@@ -56,7 +56,8 @@ class WalmartDatabase
       default_quantity: default_quantity,
       priority: normalized_priority,
       subscribable: subscribable,
-      category: category
+      category: category,
+      status: status
     )
   end
 
@@ -83,6 +84,25 @@ class WalmartDatabase
 
   def get_all_items_by_priority
     @items.order(:description, :priority).all
+  end
+
+  def get_all_active_items_by_priority
+    @items.where(status: 'active').order(:description, :priority).all
+  end
+
+  def deactivate_missing_items(sheet_prod_ids)
+    # Find all active items in the database
+    active_db_items = @items.where(status: 'active').select_map(:prod_id)
+    
+    # Determine which items are in the DB but not on the sheet
+    items_to_deactivate = active_db_items - sheet_prod_ids
+    
+    return 0 if items_to_deactivate.empty?
+    
+    # Update the status of these items to 'inactive'
+    @items.where(prod_id: items_to_deactivate).update(status: 'inactive', updated_at: Time.now)
+    
+    items_to_deactivate.count
   end
 
   # Purchase management methods

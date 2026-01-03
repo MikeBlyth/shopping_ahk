@@ -273,58 +273,41 @@ module GoogleSheetsIntegration
       puts '📊 Syncing Google Sheets data to database...'
 
       sheet_data = get_grocery_list
-      # Only sync product list to database, ignore shopping list
       items = sheet_data[:product_list]
+      
       synced_count = 0
       updated_count = 0
-      deleted_count = 0
+      reactivated_count = 0
+
+      # Get a list of all product IDs present on the sheet
+      sheet_prod_ids = items.map do |item|
+        database.extract_prod_id_from_url(item[:url])
+      end.compact
 
       items.each do |item|
-        # Handle deletion request
-        if item[:item].strip.downcase == 'delete'
-          next if item[:url].empty?
-
-          prod_id = database.extract_prod_id_from_url(item[:url])
-          if prod_id && database.find_item_by_prod_id(prod_id)
-            database.delete_item(prod_id)
-            deleted_count += 1
-            puts "🗑️  Deleted item with prod_id: #{prod_id}"
-          end
-          next
-        end
-
         next if item[:item].empty? || item[:url].empty?
 
-        # Extract product ID from URL
         prod_id = database.extract_prod_id_from_url(item[:url])
         next unless prod_id
 
-        # Check if item exists in database
         existing_item = database.find_item_by_prod_id(prod_id)
 
         if existing_item
-          # Update existing item - only update non-empty values from sheet
           updates = { updated_at: Time.now }
+          
+          # Reactivate if it was inactive
+          if existing_item[:status] == 'inactive'
+            updates[:status] = 'active'
+            reactivated_count += 1
+          end
 
-          # Only update description if sheet has non-empty value
           updates[:description] = item[:item] unless item[:item].empty?
-
-          # Only update URL if sheet has non-empty value
           updates[:url] = item[:url] unless item[:url].empty?
-
-          # Only update modifier if sheet has non-empty value
           updates[:modifier] = item[:modifier] unless item[:modifier].empty?
-
-          # Only update category if sheet has non-empty value
           updates[:category] = item[:category] unless item[:category].empty?
-
-          # Always update priority (blank cells default to 1)
           updates[:priority] = item[:priority]
-
-          # Always update subscribable field
           updates[:subscribable] = item[:subscribable]
 
-          # Only perform update if there are actual changes beyond timestamp
           if updates.keys.length > 1
             database.update_item(prod_id, updates)
             updated_count += 1
@@ -340,23 +323,24 @@ module GoogleSheetsIntegration
             priority: item[:priority],
             subscribable: item[:subscribable],
             category: item[:category]
+            # status defaults to 'active'
           )
           synced_count += 1
         end
-
-        # NOTE: Last Purchased column is now display-only and not used to create purchase records
-        # Purchase records are only created by actual purchase transactions
       end
+      
+      # Deactivate items that are in the DB but are no longer on the sheet
+      deactivated_count = database.deactivate_missing_items(sheet_prod_ids)
 
-      puts "✅ Sync complete: #{synced_count} new items, #{updated_count} updated, #{deleted_count} deleted"
-      { new: synced_count, updated: updated_count, deleted: deleted_count }
+      puts "✅ Sync complete: #{synced_count} new, #{updated_count} updated, #{reactivated_count} reactivated, #{deactivated_count} deactivated."
+      { new: synced_count, updated: updated_count, reactivated: reactivated_count, deactivated: deactivated_count }
     end
 
     def sync_from_database(database, shopping_list_data = [])
       puts '📤 Rewriting entire Google Sheets with updated data...'
 
-      # Get all items from database (sorted by priority)
-      db_items = database.get_all_items_by_priority
+      # Get only ACTIVE items from database
+      db_items = database.get_all_active_items_by_priority
 
       # Build complete sheet data
       all_rows = []

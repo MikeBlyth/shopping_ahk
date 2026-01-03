@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS items (
     description TEXT NOT NULL,               -- Item description/name
     modifier TEXT,                           -- Size, brand, or other modifier
     category TEXT,                           -- User-defined category (e.g., Dairy, Produce)
+    status VARCHAR(20) NOT NULL DEFAULT 'active', -- 'active', 'inactive'
     default_quantity INTEGER DEFAULT 1,      -- Default quantity to purchase
     priority INTEGER DEFAULT 0,              -- Shopping priority (higher = more important)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -27,6 +28,7 @@ CREATE TABLE IF NOT EXISTS purchases (
 
 -- Create indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_items_prod_id ON items(prod_id);
+CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
 CREATE INDEX IF NOT EXISTS idx_purchases_prod_id ON purchases(prod_id);
 CREATE INDEX IF NOT EXISTS idx_purchases_date ON purchases(purchase_date);
 CREATE INDEX IF NOT EXISTS idx_items_priority ON items(priority DESC);
@@ -47,9 +49,9 @@ CREATE TRIGGER update_items_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- Sample data for testing (optional)
-INSERT INTO items (prod_id, url, description, modifier, default_quantity, priority) 
+INSERT INTO items (prod_id, url, description, modifier, default_quantity, priority, status) 
 VALUES 
-    ('123456789', 'https://www.walmart.com/ip/Great-Value-2-Milk-1-Gallon/123456789', '2% Milk', '1 Gallon', 1, 9),
-    ('987654321', 'https://www.walmart.com/ip/Wonder-Bread-Classic-White/987654321', 'White Bread', 'Classic', 1, 8),
-    ('555666777', 'https://www.walmart.com/ip/Large-Eggs-Dozen/555666777', 'Large Eggs', 'Dozen', 1, 7)
+    ('123456789', 'https://www.walmart.com/ip/Great-Value-2-Milk-1-Gallon/123456789', '2% Milk', '1 Gallon', 1, 9, 'active'),
+    ('987654321', 'https://www.walmart.com/ip/Wonder-Bread-Classic-White/987654321', 'White Bread', 'Classic', 1, 8, 'active'),
+    ('555666777', 'https://www.walmart.com/ip/Large-Eggs-Dozen/555666777', 'Large Eggs', 'Dozen', 1, 7, 'active')
 ON CONFLICT (prod_id) DO NOTHING;
