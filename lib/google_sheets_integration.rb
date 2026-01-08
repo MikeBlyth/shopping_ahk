@@ -291,10 +291,29 @@ module GoogleSheetsIntegration
           next
         end
 
-        next if item[:item].empty? || item[:url].empty?
+        next if item[:item].empty?
 
         # Extract product ID from URL
         prod_id = database.extract_prod_id_from_url(item[:url])
+        
+        # If no ID from URL, try the ItemNo column
+        if prod_id.nil? && !item[:itemno].empty?
+          # Basic validation: ensure it looks like an ID (digits)
+          if item[:itemno].match(/^\d+$/)
+            prod_id = item[:itemno]
+            
+            # Construct a valid Walmart URL
+            new_url = "https://www.walmart.com/ip/#{prod_id}"
+            
+            if item[:url].empty?
+              puts "   🔗 Generated URL for '#{item[:item]}': #{new_url}"
+            else
+              puts "   🔧 Correcting invalid URL '#{item[:url]}' -> #{new_url}"
+            end
+            item[:url] = new_url
+          end
+        end
+
         next unless prod_id
 
         # Check if item exists in database

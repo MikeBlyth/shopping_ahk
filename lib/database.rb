@@ -159,9 +159,10 @@ class WalmartDatabase
   def extract_prod_id_from_url(url)
     # Walmart URLs have patterns like:
     # https://www.walmart.com/ip/Product-Name/123456789
-    # https://www.walmart.com/ip/Product-Name/123456789?param=value
+    # https://www.walmart.com/ip/123456789
     # Extract at least 4 digits before '?' or end of string
-    match = url.match(/\/ip\/[^\/]+\/(\d{4,})(?:\?|$)/)
+    # Handle optional product slug segment
+    match = url.match(/\/ip\/(?:[^\/]+\/)?(\d{4,})(?:\?|$)/)
     match ? match[1] : nil
   end
 
