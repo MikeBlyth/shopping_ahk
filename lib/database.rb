@@ -2,12 +2,17 @@ require 'sequel'
 require 'pg'
 
 class WalmartDatabase
-  def initialize
+  def initialize(readonly: false)
+    @readonly = readonly
     @db = connect_to_database
     setup_models
   end
 
   attr_reader :db
+
+  def readonly?
+    @readonly
+  end
 
   def connect_to_database
     database_url = ENV['DATABASE_URL']
@@ -45,6 +50,11 @@ class WalmartDatabase
   end
 
   def create_item(prod_id:, description:, modifier: nil, default_quantity: 1, priority: 1, subscribable: 0, category: nil, status: 'active')
+    if readonly?
+      puts "🔒 Read-only mode: Skipping creation of item #{prod_id} (#{description})"
+      return
+    end
+
     # Normalize priority: treat nil or empty as 1 (highest priority)
     normalized_priority = (priority.nil? || priority == '') ? 1 : priority
     
@@ -61,6 +71,11 @@ class WalmartDatabase
   end
 
   def update_item(prod_id, updates)
+    if readonly?
+      puts "🔒 Read-only mode: Skipping update of item #{prod_id}"
+      return
+    end
+
     # Normalize priority if it's being updated
     if updates.key?(:priority)
       priority = updates[:priority]
@@ -71,10 +86,20 @@ class WalmartDatabase
   end
 
   def update_item_description(prod_id, new_description)
+    if readonly?
+      puts "🔒 Read-only mode: Skipping description update for item #{prod_id}"
+      return
+    end
+
     @items.where(prod_id: prod_id).update(description: new_description)
   end
 
   def delete_item(prod_id)
+    if readonly?
+      puts "🔒 Read-only mode: Skipping deletion of item #{prod_id}"
+      return
+    end
+
     # First delete all purchase records for this item
     @purchases.where(prod_id: prod_id).delete
     # Then delete the item itself
@@ -90,6 +115,11 @@ class WalmartDatabase
   end
 
   def deactivate_missing_items(sheet_prod_ids)
+    if readonly?
+      puts "🔒 Read-only mode: Skipping deactivation of missing items"
+      return 0
+    end
+
     # Find all active items in the database
     active_db_items = @items.where(status: 'active').select_map(:prod_id)
     
@@ -106,6 +136,11 @@ class WalmartDatabase
 
   # Purchase management methods
   def record_purchase(prod_id:, quantity: 1, price_cents: nil, purchase_date: Date.today)
+    if readonly?
+      puts "🔒 Read-only mode: Skipping purchase recording for item #{prod_id}"
+      return
+    end
+
     @purchases.insert(
       prod_id: prod_id,
       quantity: quantity,
@@ -139,10 +174,20 @@ class WalmartDatabase
   end
 
   def update_purchase(purchase_id, updates)
+    if readonly?
+      puts "🔒 Read-only mode: Skipping update of purchase #{purchase_id}"
+      return
+    end
+
     @purchases.where(id: purchase_id).update(updates.merge(purchase_timestamp: Time.now))
   end
 
   def delete_purchase(purchase_id)
+    if readonly?
+      puts "🔒 Read-only mode: Skipping deletion of purchase #{purchase_id}"
+      return
+    end
+
     @purchases.where(id: purchase_id).delete
   end
 
@@ -274,6 +319,11 @@ class WalmartDatabase
   end
   
   def create_rotating_backup(max_backups: 7)
+    if readonly?
+      puts "🔒 Read-only mode: Skipping database backup"
+      return nil
+    end
+
     require 'fileutils'
     
     backup_dir = File.join(Dir.pwd, 'backups')
@@ -395,8 +445,8 @@ end
 class Database
   @instance = nil
 
-  def self.instance
-    @instance ||= WalmartDatabase.new
+  def self.instance(readonly: false)
+    @instance ||= WalmartDatabase.new(readonly: readonly)
   end
 
   def self.method_missing(method, *args, &block)

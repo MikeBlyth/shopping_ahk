@@ -21,9 +21,14 @@ module GoogleSheetsIntegration
       end
     end
 
-    def initialize
+    def initialize(readonly: false)
+      @readonly = readonly
       @service = Google::Apis::SheetsV4::SheetsService.new
       @service.authorization = authorize
+    end
+
+    def readonly?
+      @readonly
     end
 
     private
@@ -176,6 +181,11 @@ module GoogleSheetsIntegration
     end
 
     def update_item_url(item_name, url)
+      if readonly?
+        puts "🔒 Read-only mode: Skipping Google Sheets URL update for #{item_name}"
+        return false
+      end
+
       # Get all data and column mapping
       range = "#{sheet_name}!A:Z"
       response = @service.get_spreadsheet_values(SHEET_ID, range)
@@ -223,6 +233,11 @@ module GoogleSheetsIntegration
     end
 
     def mark_item_completed(item_name)
+      if readonly?
+        puts "🔒 Read-only mode: Skipping marking item #{item_name} as completed in Google Sheets"
+        return false
+      end
+
       # Get all data and column mapping
       range = "#{sheet_name}!A:Z"
       response = @service.get_spreadsheet_values(SHEET_ID, range)
@@ -270,6 +285,11 @@ module GoogleSheetsIntegration
     end
 
     def sync_to_database(database)
+      if readonly?
+        puts "🔒 Read-only mode: Skipping sync from Sheets to Database (would modify database)"
+        return { new: 0, updated: 0, reactivated: 0, deactivated: 0 }
+      end
+
       puts '📊 Syncing Google Sheets data to database...'
 
       sheet_data = get_grocery_list
@@ -336,6 +356,11 @@ module GoogleSheetsIntegration
     end
 
     def sync_from_database(database, shopping_list_data = [])
+      if readonly?
+        puts "🔒 Read-only mode: Skipping sync from Database to Sheets"
+        return { products: 0, shopping_items: 0 }
+      end
+
       puts '📤 Rewriting entire Google Sheets with updated data...'
 
       # Get only ACTIVE items from database
@@ -511,8 +536,8 @@ module GoogleSheetsIntegration
     end
   end
 
-  def self.create_sync_client
-    SheetsSync.new
+  def self.create_sync_client(readonly: false)
+    SheetsSync.new(readonly: readonly)
   rescue StandardError => e
     puts "⚠️  Failed to initialize Google Sheets sync: #{e.message}"
     nil

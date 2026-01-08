@@ -34,3 +34,5 @@ vendor/
 # Windows
 Thumbs.db
 Desktop.ini
+
+!test_readonly_mode.rb
