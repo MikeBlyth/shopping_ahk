@@ -6,6 +6,7 @@ require 'json'
 
 module GoogleSheetsIntegration
   class SheetsSync
+    attr_accessor :readonly
     SHEET_ID = '1LPB1mStjDhOCmLCgsD_Q9wnf2LLpWVOzmL3wGeOLvGQ'
     CREDENTIALS_FILE = 'google_credentials.json'
 
@@ -24,6 +25,7 @@ module GoogleSheetsIntegration
     def initialize
       @service = Google::Apis::SheetsV4::SheetsService.new
       @service.authorization = authorize
+      @readonly = false
     end
 
     private
@@ -176,6 +178,11 @@ module GoogleSheetsIntegration
     end
 
     def update_item_url(item_name, url)
+      if @readonly
+        puts "🚫 Read-only mode: Skipping update_item_url for #{item_name}"
+        return false
+      end
+
       # Get all data and column mapping
       range = "#{sheet_name}!A:Z"
       response = @service.get_spreadsheet_values(SHEET_ID, range)
@@ -223,6 +230,11 @@ module GoogleSheetsIntegration
     end
 
     def mark_item_completed(item_name)
+      if @readonly
+        puts "🚫 Read-only mode: Skipping mark_item_completed for #{item_name}"
+        return false
+      end
+
       # Get all data and column mapping
       range = "#{sheet_name}!A:Z"
       response = @service.get_spreadsheet_values(SHEET_ID, range)
@@ -270,6 +282,11 @@ module GoogleSheetsIntegration
     end
 
     def sync_to_database(database)
+      if @readonly
+        puts "🚫 Read-only mode: Skipping sync_to_database"
+        return { new: 0, updated: 0, reactivated: 0, deactivated: 0 }
+      end
+
       puts '📊 Syncing Google Sheets data to database...'
 
       sheet_data = get_grocery_list
@@ -337,6 +354,11 @@ module GoogleSheetsIntegration
     end
 
     def sync_from_database(database, shopping_list_data = [])
+      if @readonly
+        puts "🚫 Read-only mode: Skipping sync_from_database"
+        return { products: 0, shopping_items: 0 }
+      end
+
       puts '📤 Rewriting entire Google Sheets with updated data...'
 
       # Get only ACTIVE items from database

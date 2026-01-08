@@ -10,10 +10,12 @@ require_relative 'lib/database'
 require_relative 'lib/ahk_bridge'
 
 class WalmartGroceryAssistant
-  def initialize
+  def initialize(readonly: false)
     @ahk = AhkBridge.new
     @db = Database.instance
+    @db.readonly = readonly
     @sheets_sync = GoogleSheetsIntegration.create_sync_client
+    @sheets_sync.readonly = readonly if @sheets_sync
     @sync_completed = false # Flag to prevent double sync
 
     # Setup centralized logging
@@ -1498,6 +1500,11 @@ class WalmartGroceryAssistant
 end
 
 if __FILE__ == $0
-  assistant = WalmartGroceryAssistant.new
+  readonly_mode = ARGV.include?('--readonly')
+  if readonly_mode
+    puts "🔒 Running in READ-ONLY mode. No changes will be written to database or sheets.".colorize(:yellow)
+  end
+
+  assistant = WalmartGroceryAssistant.new(readonly: readonly_mode)
   assistant.start
 end
