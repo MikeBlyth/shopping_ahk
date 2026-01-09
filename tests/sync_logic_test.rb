@@ -130,6 +130,7 @@ class SyncStatusTest < Minitest::Test
   end
 
   def test_new_item_marked_active
+    puts "🧪 Testing that new items are marked as 'active'..."
     # Sheet has one item
     @syncer.mock_sheet_data = {
       product_list: [{ 
@@ -152,6 +153,7 @@ class SyncStatusTest < Minitest::Test
   end
 
   def test_existing_inactive_item_reactivated
+    puts "🧪 Testing that existing inactive items are reactivated when found in the sheet..."
     # Seed DB with inactive item
     @db.seed_item('200', 'inactive')
     
@@ -178,6 +180,7 @@ class SyncStatusTest < Minitest::Test
   end
 
   def test_missing_item_deactivated
+    puts "🧪 Testing that items missing from the sheet are deactivated..."
     # Seed DB with active item that is NOT in the sheet
     @db.seed_item('300', 'active')
     # And one that IS in the sheet
@@ -210,6 +213,7 @@ class SyncStatusTest < Minitest::Test
   end
   
   def test_bulk_deactivate_items_logic
+    puts "🧪 Testing bulk deactivation logic in the database..."
     # Test the database helper directly
     @db.seed_item('A', 'active')
     @db.seed_item('B', 'active')
@@ -225,6 +229,7 @@ class SyncStatusTest < Minitest::Test
   end
   
   def test_get_all_active_prod_ids
+    puts "🧪 Testing retrieval of all active product IDs..."
     @db.seed_item('X', 'active')
     @db.seed_item('Y', 'inactive')
     

@@ -118,6 +118,7 @@ class ReadOnlyModeTest < Minitest::Test
   # --- Database Tests ---
 
   def test_database_readonly_create_item
+    puts "🧪 Testing database read-only mode for creating items..."
     db_wrapper = TestWalmartDatabase.new(readonly: true)
     
     out, _ = capture_io do
@@ -133,6 +134,7 @@ class ReadOnlyModeTest < Minitest::Test
   end
 
   def test_database_readonly_update_item
+    puts "🧪 Testing database read-only mode for updating items..."
     db_wrapper = TestWalmartDatabase.new(readonly: true)
     
     out, _ = capture_io do
@@ -144,6 +146,7 @@ class ReadOnlyModeTest < Minitest::Test
   end
 
   def test_database_readonly_delete_item
+    puts "🧪 Testing database read-only mode for deleting items..."
     db_wrapper = TestWalmartDatabase.new(readonly: true)
     
     out, _ = capture_io do
@@ -156,6 +159,7 @@ class ReadOnlyModeTest < Minitest::Test
   end
 
   def test_database_readonly_record_purchase
+    puts "🧪 Testing database read-only mode for recording purchases..."
     db_wrapper = TestWalmartDatabase.new(readonly: true)
     
     out, _ = capture_io do
@@ -167,6 +171,7 @@ class ReadOnlyModeTest < Minitest::Test
   end
 
   def test_database_readonly_backup
+    puts "🧪 Testing database read-only mode for creating backups..."
     db_wrapper = TestWalmartDatabase.new(readonly: true)
     
     out, _ = capture_io do
@@ -178,6 +183,7 @@ class ReadOnlyModeTest < Minitest::Test
   end
   
   def test_database_write_mode_create_item
+    puts "🧪 Testing database write mode for creating items..."
     db_wrapper = TestWalmartDatabase.new(readonly: false)
     
     # In write mode, it connects to our MockDB. 
@@ -193,6 +199,7 @@ class ReadOnlyModeTest < Minitest::Test
   # --- Google Sheets Tests ---
 
   def test_sheets_readonly_update_url
+    puts "🧪 Testing Google Sheets read-only mode for updating URLs..."
     client = GoogleSheetsIntegration::SheetsSync.new(readonly: true)
     
     out, _ = capture_io do
@@ -204,6 +211,7 @@ class ReadOnlyModeTest < Minitest::Test
   end
   
   def test_sheets_readonly_mark_completed
+    puts "🧪 Testing Google Sheets read-only mode for marking items completed..."
     client = GoogleSheetsIntegration::SheetsSync.new(readonly: true)
     
     out, _ = capture_io do
@@ -215,6 +223,7 @@ class ReadOnlyModeTest < Minitest::Test
   end
   
   def test_sheets_readonly_sync_from_database
+    puts "🧪 Testing Google Sheets read-only mode for syncing from database..."
     client = GoogleSheetsIntegration::SheetsSync.new(readonly: true)
     db_mock = Object.new 
     
@@ -226,6 +235,7 @@ class ReadOnlyModeTest < Minitest::Test
   end
 
   def test_sheets_write_mode_attempts_write
+    puts "🧪 Testing Google Sheets write mode for write operations..."
     client = GoogleSheetsIntegration::SheetsSync.new(readonly: false)
     
     # In write mode, calling update_item_url should eventually hit the mocked API which raises an error

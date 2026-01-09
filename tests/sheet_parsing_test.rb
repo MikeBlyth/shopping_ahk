@@ -43,6 +43,7 @@ class SheetParsingTest < Minitest::Test
   end
 
   def test_parsing_stops_at_total
+    puts "🧪 Testing that parsing stops when it encounters 'TOTAL' in column 1..."
     # Mock data with a TOTAL row
     rows = [
       ['Purchased', 'Item', 'Price'], # Header
@@ -62,6 +63,7 @@ class SheetParsingTest < Minitest::Test
   end
 
   def test_parsing_stops_at_category
+    puts "🧪 Testing that parsing stops when it encounters 'CATEGORY BREAKDOWN'..."
     # Mock data with a CATEGORY row
     rows = [
       ['Purchased', 'Item', 'Price'], # Header
@@ -81,6 +83,7 @@ class SheetParsingTest < Minitest::Test
   end
 
   def test_ignores_price_in_description
+    puts "🧪 Testing that rows with prices in the description column are ignored..."
     # Mock data with a misplaced price in description column
     rows = [
       ['Purchased', 'Item', 'Price'], # Header
