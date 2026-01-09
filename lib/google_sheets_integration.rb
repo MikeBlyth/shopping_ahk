@@ -98,6 +98,7 @@ module GoogleSheetsIntegration
       itemno_col = find_column_index(header_map, 'itemno', 'item no', 'itemid', 'item id', 'prodid', 'product id', 'id')
       url_col = find_column_index(header_map, 'url', 'link', 'website')
       subscribable_col = find_column_index(header_map, 'subscribable', 'subscribe', 'sub', 'subscription')
+      category_col = find_column_index(header_map, 'category', 'cat', 'dept', 'department')
 
       product_list = []
       shopping_list = []
@@ -137,6 +138,7 @@ module GoogleSheetsIntegration
           itemno: itemno_col ? (row[itemno_col]&.strip || '') : '',
           url: url_col ? (row[url_col]&.strip || '') : '',
           subscribable: subscribable,
+          category: category_col ? (row[category_col]&.strip || '') : '',
           original_row_index: index + 2 # +2 because we skipped header and arrays are 0-indexed
         }
 
@@ -337,6 +339,9 @@ module GoogleSheetsIntegration
 
           # Always update subscribable field
           updates[:subscribable] = item[:subscribable]
+          
+          # Only update category if sheet has non-empty value
+          updates[:category] = item[:category] unless item[:category].empty?
 
           # Only perform update if there are actual changes beyond timestamp
           if updates.keys.length > 1
@@ -352,7 +357,8 @@ module GoogleSheetsIntegration
             modifier: item[:modifier],
             default_quantity: item[:quantity] || 1,
             priority: item[:priority],
-            subscribable: item[:subscribable]
+            subscribable: item[:subscribable],
+            category: item[:category]
           )
           synced_count += 1
         end
@@ -376,7 +382,7 @@ module GoogleSheetsIntegration
 
       # 1. Headers
       headers = ['Purchased', 'Item Name', 'Modifier', 'Priority', 'Qty', 'Last Purchased', 'ItemNo', 'URL',
-                 'Subscribable']
+                 'Subscribable', 'Category']
       all_rows << headers
 
       # 2. Product list section
@@ -385,23 +391,23 @@ module GoogleSheetsIntegration
         recent_purchase = database.get_purchase_history(db_item[:prod_id], limit: 1).first
         last_purchased = recent_purchase ? recent_purchase[:purchase_date].to_s : ''
 
-        # Build row with fixed column order: Purchased, Item Name, Modifier, Priority, Qty, Last Purchased, ItemNo, URL, Subscribable
+        # Build row with fixed column order: Purchased, Item Name, Modifier, Priority, Qty, Last Purchased, ItemNo, URL, Subscribable, Category
         # Leave priority blank if it's 1 (highest priority default)
         # Leave quantity blank in product list (not used for ordering)
         # Display subscribable as green check for 1, blank for 0
         priority_display = db_item[:priority] == 1 ? '' : db_item[:priority].to_s
         subscribable_display = db_item[:subscribable] == 1 ? '✅' : ''
         row = ['', db_item[:description], db_item[:modifier] || '', priority_display, '', last_purchased,
-               db_item[:prod_id], db_item[:url], subscribable_display]
+               db_item[:prod_id], db_item[:url], subscribable_display, db_item[:category] || '']
 
         all_rows << row
       end
 
       # 3. Blank line separator
-      all_rows << ['', '', '', '', '', '', '', '', '']
+      all_rows << ['', '', '', '', '', '', '', '', '', '']
 
       # 4. Shopping List delimiter
-      all_rows << ['Shopping List', '', '', '', '', '', '', '', '']
+      all_rows << ['Shopping List', '', '', '', '', '', '', '', '', '']
 
       # 5. Shopping list items (simple format)
       shopping_list_start_row = all_rows.length + 1 # Track where shopping list starts for formula
@@ -436,7 +442,7 @@ module GoogleSheetsIntegration
         item_number = shopping_item[:itemno] || ''
 
         # Shopping list format: purchased_display | description | price_value | itemid
-        row = [purchased_display, shopping_item[:item], price_value, item_number]
+        row = [purchased_display, shopping_item[:item], price_value, item_number, '', '', '', '', '', '']
 
         all_rows << row
       end
@@ -445,7 +451,7 @@ module GoogleSheetsIntegration
       shopping_list_end_row = all_rows.length
       # Formula sums column C (price column) from shopping list start to end
       total_formula = "=SUM(C#{shopping_list_start_row + 1}:C#{shopping_list_end_row})"
-      total_row = ['TOTAL', '', total_formula, '']
+      total_row = ['TOTAL', '', total_formula, '', '', '', '', '', '', '']
       all_rows << total_row
 
       # Clear entire sheet and rewrite
@@ -456,7 +462,7 @@ module GoogleSheetsIntegration
 
         # Write all data at once
         if all_rows.length > 1 # More than just headers
-          write_range = "#{sheet_name}!A1:I#{all_rows.length}"
+          write_range = "#{sheet_name}!A1:J#{all_rows.length}"
           value_range = Google::Apis::SheetsV4::ValueRange.new(
             range: write_range,
             values: all_rows
@@ -505,7 +511,7 @@ module GoogleSheetsIntegration
                 start_row_index: total_row_index - 1, # Convert to 0-indexed
                 end_row_index: total_row_index,
                 start_column_index: 0,
-                end_column_index: 9
+                end_column_index: 10
               },
               cell: {
                 user_entered_format: {
