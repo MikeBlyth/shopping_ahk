@@ -119,11 +119,19 @@ module GoogleSheetsIntegration
           next
         end
 
+        # Stop processing if we hit the TOTAL line or CATEGORY section
+        if in_shopping_section && (first_col_text.upcase.include?('TOTAL') || first_col_text.upcase.include?('CATEGORY'))
+          break
+        end
+
         # Skip rows without item names
         item_name = item_col ? (row[item_col]&.strip&.gsub(/[[:punct:]\s]+$/, '') || '') : ''
         next if item_name.empty?
 
-        # Skip TOTAL
+        # Ignore rows where the item name is actually a price (contains '$')
+        next if item_name.include?('$')
+
+        # Skip TOTAL (legacy check, kept for safety)
         next if item_name.include?('TOTAL')
 
         # Parse subscribable field: check mark or '1' = 1, 'x' or blank = 0

@@ -31,6 +31,9 @@
 - **Improved URL Sync**: Auto-generates URLs from Item IDs if missing; handles simplified Walmart URL formats.
 - **Dialog Stability**: Fixed crash when cancelling "Add Item" dialog ("Control is destroyed" error).
 - **Skip Functionality**: Added "Skip Item" button to manual entry dialog with proper Ruby handling.
+- **Enhanced Sheet Parsing**: 
+  - Stops processing shopping list when "TOTAL" or "CATEGORY" is encountered.
+  - Ignores rows where the item description contains a `$` sign (misplaced prices).
 - **Sync Logic**: Prevents blank sheet entries from overwriting existing database values; ensures URLs are captured even if missing in sheet.
 - **Active/Inactive Status**: Added `status` column to items. Items removed from the sheet are now marked as `inactive` (archived) in the database instead of being deleted. They can be reactivated by adding them back to the sheet.
 - **Testing Structure**: Moved tests to `tests/` directory. Added `sync_logic_test.rb` to verify status transitions. Run tests with `ruby tests/test_file.rb`.
