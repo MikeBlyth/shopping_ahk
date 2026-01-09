@@ -435,7 +435,7 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity, pref
     global CurrentAddItemDialog := ""
     global CurrentDialogControls := ""
     
-    ; Show dialog immediately (positioned 400px left of center)
+    ; Show dialog immediately 
     purchaseGui.Show("x100")
 
     ; Start purchase detection and price detection immediately
@@ -848,6 +848,7 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl, prefill_price := "") {
     ; Buttons - Override button starts as warning state
     addButton := addItemGui.Add("Button", "xm y+15 w120 h30 BackgroundRed cWhite", "⚠️ Override")
     addOnlyButton := addItemGui.Add("Button", "x+10 w100 h30", "Add Only")
+    skipButton := addItemGui.Add("Button", "x+10 w100 h30", "Skip Item")
     cancelButton := addItemGui.Add("Button", "x+10 w100 h30", "Cancel")
     
     ; Make variables accessible to event handlers
@@ -871,6 +872,7 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl, prefill_price := "") {
     ; Button event handlers
     addButton.OnEvent("Click", (*) => AddAndPurchaseClickHandler(addItemGui))
     addOnlyButton.OnEvent("Click", (*) => AddOnlyClickHandler(addItemGui))
+    skipButton.OnEvent("Click", (*) => SkipItemClickHandler(addItemGui))
     cancelButton.OnEvent("Click", (*) => CancelItemClickHandler(addItemGui))
     
     ; Store purchase button and price edit references globally for click detection
@@ -882,8 +884,7 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl, prefill_price := "") {
     addItemGui.OnEvent("Close", (*) => CleanupDialogReferences())
     
     ; Show dialog immediately (positioned 400px left of center)
-    dialogX := (A_ScreenWidth / 2) - 400 - 250  ; Center minus 400px minus half dialog width
-    dialogX := 100 ; Center minus 400px minus half dialog width
+    dialogX := 100 
     addItemGui.Show("x" . dialogX)
 
     ; Start purchase detection and price detection immediately
@@ -958,9 +959,9 @@ AddAndPurchaseClickHandler(gui) {
     response_obj["price"] := price != "" ? Float(price) : ""
     response_obj["purchase_quantity"] := Integer(purchaseQuantity)
     
-    WriteDebug("AddAndPurchaseClickHandler - writing JSON response")
     WriteResponseJSON(response_obj)
     StopPriceDetection()
+    CleanupDialogReferences()
     gui.Destroy()
     
     ; Show confirmation
@@ -1019,15 +1020,24 @@ AddOnlyClickHandler(gui) {
 
     WriteResponseJSON(response_obj)
     StopPriceDetection()
+    CleanupDialogReferences()
     gui.Destroy()
     
     ; Show confirmation
     MsgBox("Item '" . description . "' has been sent to Ruby for processing!", "Item Added", "OK")
 }
 
+SkipItemClickHandler(gui) {
+    SendStatus("skipped")
+    StopPriceDetection()
+    CleanupDialogReferences()
+    gui.Destroy()
+}
+
 CancelItemClickHandler(gui) {
     SendStatus("cancelled")
     StopPriceDetection()
+    CleanupDialogReferences()
     ; Silent close - no messages
     gui.Destroy()
 }

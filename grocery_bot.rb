@@ -494,6 +494,11 @@ class WalmartGroceryAssistant
           puts '   🛑 User requested shutdown during wait'
           @logger.debug("Shutdown requested, breaking loop.")
           break
+        when 'skipped'
+          @logger.debug("Skip response received, handling completion.")
+          handle_shopping_list_completion(item_name, response)
+          puts "   ✅ Item '#{item_name}' completed"
+          break
         else
           @logger.debug("Ignoring status response: #{response.inspect}")
         end
@@ -512,13 +517,6 @@ class WalmartGroceryAssistant
         handle_shopping_list_completion(item_name, response)
         puts "   ✅ Item '#{item_name}' completed"
         break
-      when 'status'
-        if response[:value] == 'skipped'
-          @logger.debug("Skip response received, handling completion.")
-          handle_shopping_list_completion(item_name, response)
-          puts "   ✅ Item '#{item_name}' completed"
-          break
-        end
       else
         # Handle other response types that might complete the item
         if response[:type] != 'status'
