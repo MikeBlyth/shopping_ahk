@@ -10,10 +10,11 @@ require_relative 'lib/database'
 require_relative 'lib/ahk_bridge'
 
 class WalmartGroceryAssistant
-  def initialize
+  def initialize(readonly: false)
+    @readonly = readonly
     @ahk = AhkBridge.new
-    @db = Database.instance
-    @sheets_sync = GoogleSheetsIntegration.create_sync_client
+    @db = Database.instance(readonly: @readonly)
+    @sheets_sync = GoogleSheetsIntegration.create_sync_client(readonly: @readonly)
     @sync_completed = false # Flag to prevent double sync
 
     # Setup centralized logging
@@ -32,6 +33,11 @@ class WalmartGroceryAssistant
       else
         "#{msg}\n"
       end
+    end
+    
+    if @readonly
+      puts "🔒 WALMART GROCERY ASSISTANT STARTED IN READ-ONLY MODE".colorize(:yellow)
+      puts "   No changes will be made to the database or Google Sheets.".colorize(:yellow)
     end
 
     # Setup cleanup handlers for unexpected exits
@@ -101,8 +107,10 @@ class WalmartGroceryAssistant
     end
     
     # Always create backup at end of session (regardless of changes)
-    puts '💾 Creating database backup...'
-    @db.create_rotating_backup
+    unless @readonly
+      puts '💾 Creating database backup...'
+      @db.create_rotating_backup
+    end
   rescue StandardError => e
     puts "\n❌ An error occurred: #{e.message}"
     puts "📍 Location: #{e.backtrace.first}"
@@ -144,8 +152,10 @@ class WalmartGroceryAssistant
           @sync_completed = true
           
           # Create rotating database backup after final sync
-          puts '💾 Creating database backup...'
-          @db.create_rotating_backup
+          unless @readonly
+            puts '💾 Creating database backup...'
+            @db.create_rotating_backup
+          end
         rescue StandardError => e
           puts "❌ Final sheet sync failed: #{e.message}"
         end
@@ -1496,6 +1506,7 @@ class WalmartGroceryAssistant
 end
 
 if __FILE__ == $0
-  assistant = WalmartGroceryAssistant.new
+  readonly_mode = ARGV.include?('--readonly')
+  assistant = WalmartGroceryAssistant.new(readonly: readonly_mode)
   assistant.start
 end

@@ -11,6 +11,8 @@ Automate grocery shopping navigation on Walmart.com using AutoHotkey for browser
   - **Known items**: Opens saved Walmart URL, waits for you to add to cart
   - **New items**: Searches Walmart, lets you find the product, saves URL for future
 - Tracks purchase history in PostgreSQL database
+- **Calculates usage stats**: Tracks units per week and average monthly cost per item
+- **Generates reports**: Adds a "Category Breakdown" report to the bottom of your sheet
 - Uses AutoHotkey for reliable browser automation (no bot detection)
 - You handle login, cart management, and checkout manually
 
@@ -131,10 +133,10 @@ ruby grocery_bot.rb
 ### 3. Follow the Interactive Workflow
 - Bot loads your grocery list from Google Sheets
 - For each item:
-  - **Known items**: AHK opens the product URL
-  - **New items**: AHK searches Walmart
-  - You manually add items to cart
-  - Bot records purchase data
+  - **Known items**: AHK opens the product URL. Verify price/quantity in dialog, click "Add & Purchase" (or wait for auto-detect).
+  - **New items**: AHK searches Walmart. Navigate to product, then press **Ctrl+Shift+A** to add.
+  - **Manual Entry**: Press **Ctrl+Shift+A** anytime to add the current product page to the database/shopping list.
+  - **Skip**: Click "Skip Item" in any dialog to mark the item as skipped (❌) in the sheet.
 
 ## How AutoHotkey Integration Works
 
@@ -145,7 +147,7 @@ The Ruby script communicates with AutoHotkey via temporary files:
 - Commands: `OPEN_URL|https://walmart.com/ip/123`, `SEARCH|frozen peas`
 
 **AHK → Ruby:**
-- Writes status to `ahk_status.txt` 
+- Writes status to `ahk_status.txt` or JSON response to `ahk_response.txt`
 - Status: `READY`, `NAVIGATING`, `WAITING_FOR_USER`
 
 **AHK Script Functions:**
@@ -157,7 +159,7 @@ The Ruby script communicates with AutoHotkey via temporary files:
 ## Safety Features
 
 - **No automated purchasing**: You handle all cart and checkout actions
-- **Manual cart control**: Bot never clicks "Add to Cart"
+- **Manual cart control**: Bot never clicks "Add to Cart" (it only detects when YOU click it)
 - **Human verification**: Bot waits for your confirmation at each step
 - **Real browser**: Uses your normal browser (no bot detection)
 - **Graceful errors**: Continues if individual items fail
@@ -166,12 +168,20 @@ The Ruby script communicates with AutoHotkey via temporary files:
 ## Google Sheets Format
 
 Your grocery sheet should have these columns:
-- **A**: item (name/description)  
-- **B**: url (Walmart product URL - populated by bot)
-- **C**: itemno (product ID - extracted by bot)
-- **D**: quantity (default quantity to buy)
-- **E**: last purchased (date - updated by bot)
-- **F**: prev (previous purchase date)
+- **A**: Purchased (status)
+- **B**: Item Name
+- **C**: Modifier
+- **D**: Priority
+- **E**: Qty
+- **F**: Last Purchased
+- **G**: ItemNo
+- **H**: URL
+- **I**: Subscribable
+- **J**: Category
+- **K**: Units/Week (Calculated stats)
+- **L**: Avg Cost/Month (Calculated stats)
+
+**Note**: The bot will automatically rewrite the sheet structure to match this format, preserving your data.
 
 ## Database Schema
 
@@ -179,8 +189,11 @@ Your grocery sheet should have these columns:
 - prod_id (VARCHAR) - Walmart product ID
 - url (TEXT) - Full Walmart product URL
 - description (TEXT) - Item name/description
+- modifier (TEXT) - Size/flavor variant
 - default_quantity (INTEGER) - Default amount to buy
 - priority (INTEGER) - Shopping priority
+- subscribable (INTEGER) - 1 if item is subscribed, 0 otherwise
+- category (TEXT) - Item category/department
 - created_at, updated_at (TIMESTAMP)
 
 **purchases table:**

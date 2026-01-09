@@ -2,12 +2,14 @@ require 'sequel'
 require 'pg'
 
 class WalmartDatabase
-  def initialize
+  def initialize(readonly: false)
+    @readonly = readonly
     @db = connect_to_database
     setup_models
+    puts "🔒 Database initialized in READ-ONLY mode" if @readonly
   end
 
-  attr_reader :db
+  attr_reader :db, :readonly
 
   def connect_to_database
     database_url = ENV['DATABASE_URL']
@@ -45,6 +47,11 @@ class WalmartDatabase
   end
 
   def create_item(prod_id:, url:, description:, modifier: nil, default_quantity: 1, priority: 1, subscribable: 0, category: nil)
+    if @readonly
+      puts "🔒 Read-only mode: Skipping creation of item #{prod_id} (#{description})"
+      return
+    end
+
     # Normalize priority: treat nil or empty as 1 (highest priority)
     normalized_priority = (priority.nil? || priority == '') ? 1 : priority
     
@@ -61,6 +68,11 @@ class WalmartDatabase
   end
 
   def update_item(prod_id, updates)
+    if @readonly
+      puts "🔒 Read-only mode: Skipping update of item #{prod_id}"
+      return
+    end
+
     # Normalize priority if it's being updated
     if updates.key?(:priority)
       priority = updates[:priority]
@@ -71,14 +83,51 @@ class WalmartDatabase
   end
 
   def update_item_description(prod_id, new_description)
+    if @readonly
+      puts "🔒 Read-only mode: Skipping description update for item #{prod_id}"
+      return
+    end
+
     @items.where(prod_id: prod_id).update(description: new_description)
   end
 
   def delete_item(prod_id)
+    if @readonly
+      puts "🔒 Read-only mode: Skipping deletion of item #{prod_id}"
+      return
+    end
+
     # First delete all purchase records for this item
     @purchases.where(prod_id: prod_id).delete
     # Then delete the item itself
     @items.where(prod_id: prod_id).delete
+  end
+
+  def get_database_start_date
+    start_time = @items.min(:created_at)
+    start_time ? start_time.to_date : Date.today
+  end
+
+  def get_all_items_with_stats
+    @items.left_join(:purchases, prod_id: :prod_id)
+          .select_group(Sequel[:items][:id], Sequel[:items][:prod_id], Sequel[:items][:description], 
+                        Sequel[:items][:modifier], Sequel[:items][:priority], Sequel[:items][:url], 
+                        Sequel[:items][:subscribable], Sequel[:items][:category])
+          .select_append { min(purchase_date).as(:first_purchase) }
+          .select_append { max(purchase_date).as(:last_purchase) }
+          .select_append { sum(quantity).as(:total_units) }
+          .select_append { sum(quantity * coalesce(price_cents, 0)).as(:total_cost_cents) }
+          .order(:description, :priority)
+          .all
+  end
+
+  def get_category_stats
+    @items.join(:purchases, prod_id: :prod_id)
+          .group(:category)
+          .select_group(:category)
+          .select_append { sum(quantity * coalesce(price_cents, 0)).as(:total_cost_cents) }
+          .order(Sequel.desc(:total_cost_cents))
+          .all
   end
 
   def get_all_items_by_priority
@@ -87,6 +136,11 @@ class WalmartDatabase
 
   # Purchase management methods
   def record_purchase(prod_id:, quantity: 1, price_cents: nil, purchase_date: Date.today)
+    if @readonly
+      puts "🔒 Read-only mode: Skipping purchase record for #{prod_id}"
+      return
+    end
+
     @purchases.insert(
       prod_id: prod_id,
       quantity: quantity,
@@ -120,10 +174,20 @@ class WalmartDatabase
   end
 
   def update_purchase(purchase_id, updates)
+    if @readonly
+      puts "🔒 Read-only mode: Skipping update of purchase #{purchase_id}"
+      return
+    end
+
     @purchases.where(id: purchase_id).update(updates.merge(purchase_timestamp: Time.now))
   end
 
   def delete_purchase(purchase_id)
+    if @readonly
+      puts "🔒 Read-only mode: Skipping deletion of purchase #{purchase_id}"
+      return
+    end
+
     @purchases.where(id: purchase_id).delete
   end
 
@@ -208,6 +272,11 @@ class WalmartDatabase
   end
   
   def create_rotating_backup(max_backups: 7)
+    if @readonly
+      puts "🔒 Read-only mode: Skipping database backup creation"
+      return nil
+    end
+
     require 'fileutils'
     
     backup_dir = File.join(Dir.pwd, 'backups')
@@ -322,8 +391,8 @@ end
 class Database
   @instance = nil
 
-  def self.instance
-    @instance ||= WalmartDatabase.new
+  def self.instance(readonly: false)
+    @instance ||= WalmartDatabase.new(readonly: readonly)
   end
 
   def self.method_missing(method, *args, &block)

@@ -21,9 +21,11 @@ module GoogleSheetsIntegration
       end
     end
 
-    def initialize
+    def initialize(readonly: false)
+      @readonly = readonly
       @service = Google::Apis::SheetsV4::SheetsService.new
       @service.authorization = authorize
+      puts "🔒 Google Sheets integration initialized in READ-ONLY mode" if @readonly
     end
 
     private
@@ -176,6 +178,11 @@ module GoogleSheetsIntegration
     end
 
     def update_item_url(item_name, url)
+      if @readonly
+        puts "🔒 Read-only mode: Skipping URL update for '#{item_name}' in Google Sheets"
+        return false
+      end
+
       # Get all data and column mapping
       range = "#{sheet_name}!A:Z"
       response = @service.get_spreadsheet_values(SHEET_ID, range)
@@ -223,6 +230,11 @@ module GoogleSheetsIntegration
     end
 
     def mark_item_completed(item_name)
+      if @readonly
+        puts "🔒 Read-only mode: Skipping mark completed for '#{item_name}' in Google Sheets"
+        return false
+      end
+
       # Get all data and column mapping
       range = "#{sheet_name}!A:Z"
       response = @service.get_spreadsheet_values(SHEET_ID, range)
@@ -372,42 +384,66 @@ module GoogleSheetsIntegration
     end
 
     def sync_from_database(database, shopping_list_data = [])
+      if @readonly
+        puts "🔒 Read-only mode: Skipping Google Sheets sync (rewrite)"
+        return { products: 0, shopping_items: 0, error: 'read-only' }
+      end
+
       puts '📤 Rewriting entire Google Sheets with updated data...'
 
-      # Get all items from database (sorted by priority)
-      db_items = database.get_all_items_by_priority
+      # Get all items from database with stats (sorted by priority)
+      db_items = database.get_all_items_with_stats
 
       # Build complete sheet data
       all_rows = []
 
       # 1. Headers
       headers = ['Purchased', 'Item Name', 'Modifier', 'Priority', 'Qty', 'Last Purchased', 'ItemNo', 'URL',
-                 'Subscribable', 'Category']
+                 'Subscribable', 'Category', 'Units/Week', 'Avg Cost/Month']
       all_rows << headers
 
       # 2. Product list section
-      db_items.each do |db_item|
-        # Get most recent purchase for this item
-        recent_purchase = database.get_purchase_history(db_item[:prod_id], limit: 1).first
-        last_purchased = recent_purchase ? recent_purchase[:purchase_date].to_s : ''
+      today = Date.today
+      global_start_date = database.get_database_start_date
+      puts "🔍 DEBUG: Global start date for stats: #{global_start_date}"
+      
+      days_diff = (today - global_start_date).to_i
+      # Ensure at least 1 day to avoid infinity/zeros
+      days_diff = 1 if days_diff < 1
+      
+      weeks = days_diff / 7.0
+      months = days_diff / 30.4375
 
-        # Build row with fixed column order: Purchased, Item Name, Modifier, Priority, Qty, Last Purchased, ItemNo, URL, Subscribable, Category
-        # Leave priority blank if it's 1 (highest priority default)
-        # Leave quantity blank in product list (not used for ordering)
-        # Display subscribable as green check for 1, blank for 0
+      db_items.each do |db_item|
+        # Get stats from the aggregated query
+        last_purchased = db_item[:last_purchase] ? db_item[:last_purchase].to_s : ''
+        # first_purchased is no longer used for the denominator
+        total_units = db_item[:total_units] || 0
+        total_cost = (db_item[:total_cost_cents] || 0) / 100.0
+        
+        # Calculate derived stats using global time period
+        units_per_week = total_units / weeks
+        cost_per_month = total_cost / months
+        
+        # Build row with fixed column order
         priority_display = db_item[:priority] == 1 ? '' : db_item[:priority].to_s
         subscribable_display = db_item[:subscribable] == 1 ? '✅' : ''
+        
         row = ['', db_item[:description], db_item[:modifier] || '', priority_display, '', last_purchased,
-               db_item[:prod_id], db_item[:url], subscribable_display, db_item[:category] || '']
+               db_item[:prod_id], db_item[:url], subscribable_display, db_item[:category] || '',
+               units_per_week > 0 ? units_per_week.round(2) : '',
+               cost_per_month > 0 ? cost_per_month.round(2) : '']
 
         all_rows << row
       end
 
       # 3. Blank line separator
-      all_rows << ['', '', '', '', '', '', '', '', '', '']
+      all_rows << Array.new(12, '')
 
       # 4. Shopping List delimiter
-      all_rows << ['Shopping List', '', '', '', '', '', '', '', '', '']
+      delimiter_row = Array.new(12, '')
+      delimiter_row[0] = 'Shopping List'
+      all_rows << delimiter_row
 
       # 5. Shopping list items (simple format)
       shopping_list_start_row = all_rows.length + 1 # Track where shopping list starts for formula
@@ -428,21 +464,15 @@ module GoogleSheetsIntegration
           # Strip $ and other currency formatting, then convert to float
           price_string = shopping_item[:price].to_s.gsub(/[$,\s]/, '')
           price_value = price_string.to_f
-          if price_value > 0
-          #            puts "🔍 DEBUG: Using numeric price: #{price_value} (from '#{shopping_item[:price]}')"
-          else
-            price_value = ''
-            puts "🔍 DEBUG: Invalid price format '#{shopping_item[:price]}' - using empty cell"
-          end
+          price_value = '' if price_value <= 0
         else
           price_value = '' # Empty cell for items without prices
-          puts '🔍 DEBUG: No price - using empty cell'
         end
 
         item_number = shopping_item[:itemno] || ''
 
-        # Shopping list format: purchased_display | description | price_value | itemid
-        row = [purchased_display, shopping_item[:item], price_value, item_number, '', '', '', '', '', '']
+        # Shopping list format: purchased_display | description | price_value | itemid | ... blanks
+        row = [purchased_display, shopping_item[:item], price_value, item_number] + Array.new(8, '')
 
         all_rows << row
       end
@@ -451,8 +481,29 @@ module GoogleSheetsIntegration
       shopping_list_end_row = all_rows.length
       # Formula sums column C (price column) from shopping list start to end
       total_formula = "=SUM(C#{shopping_list_start_row + 1}:C#{shopping_list_end_row})"
-      total_row = ['TOTAL', '', total_formula, '', '', '', '', '', '', '']
+      total_row = ['TOTAL', '', total_formula] + Array.new(9, '')
       all_rows << total_row
+
+      # 7. Category Report (Mini-Report)
+      all_rows << Array.new(12, '') # Blank separator
+      
+      # Header for report
+      cat_report_start_row = all_rows.length + 1
+      all_rows << ['CATEGORY BREAKDOWN', 'Cost/Month'] + Array.new(10, '')
+      
+      # Fetch and calculate stats
+      category_stats = database.get_category_stats
+      
+      category_stats.each do |cat_stat|
+        total_cat_cost = (cat_stat[:total_cost_cents] || 0) / 100.0
+        cat_monthly_cost = months > 0 ? total_cat_cost / months : 0
+        
+        cat_name = cat_stat[:category]
+        cat_name = '(Uncategorized)' if cat_name.nil? || cat_name.empty?
+        
+        all_rows << [cat_name, cat_monthly_cost.round(2)] + Array.new(10, '')
+      end
+      cat_report_end_row = all_rows.length
 
       # Clear entire sheet and rewrite
       begin
@@ -462,7 +513,7 @@ module GoogleSheetsIntegration
 
         # Write all data at once
         if all_rows.length > 1 # More than just headers
-          write_range = "#{sheet_name}!A1:J#{all_rows.length}"
+          write_range = "#{sheet_name}!A1:L#{all_rows.length}"
           value_range = Google::Apis::SheetsV4::ValueRange.new(
             range: write_range,
             values: all_rows
@@ -475,59 +526,105 @@ module GoogleSheetsIntegration
             value_input_option: 'USER_ENTERED' # This allows formulas to be interpreted
           )
 
-          # Format price column as currency and make TOTAL row bold
-          total_row_index = all_rows.length # Last row (1-indexed)
+          # Format columns
+          total_row_index = shopping_list_end_row + 1 # 1-indexed (TOTAL row)
+          price_format_start = shopping_list_start_row
 
-          # Format price column (column C, index 2) as currency
-          # shopping_list_start_row + 1 because we need to skip the "Shopping List" delimiter row
-          price_format_start = shopping_list_start_row # This should be the first actual shopping item
-          puts "🔍 DEBUG: Formatting currency from row #{price_format_start} to #{total_row_index}"
+          # Request list for batch update
+          requests = []
 
-          price_column_format = {
+          # 1. Price Column Currency Format (Shopping List)
+          requests << {
             repeat_cell: {
               range: {
-                sheet_id: 0, # Assuming first sheet
-                start_row_index: price_format_start - 1, # Convert to 0-indexed (subtract 1)
-                end_row_index: total_row_index, # Include TOTAL row
-                start_column_index: 2, # Column C (price column)
+                sheet_id: 0,
+                start_row_index: price_format_start - 1,
+                end_row_index: total_row_index,
+                start_column_index: 2, # Column C
                 end_column_index: 3
               },
-              cell: {
-                user_entered_format: {
-                  number_format: {
-                    type: 'CURRENCY',
-                    pattern: '"$"#,##0.00'
-                  }
-                }
-              },
+              cell: { user_entered_format: { number_format: { type: 'CURRENCY', pattern: '"$"#,##0.00' } } },
               fields: 'userEnteredFormat.numberFormat'
             }
           }
 
-          bold_request = {
+          # 2. Avg Cost/Month Number Format (Column L, index 11)
+          requests << {
             repeat_cell: {
               range: {
-                sheet_id: 0, # Assuming first sheet
-                start_row_index: total_row_index - 1, # Convert to 0-indexed
-                end_row_index: total_row_index,
-                start_column_index: 0,
-                end_column_index: 10
+                sheet_id: 0,
+                start_row_index: 1, # Skip header
+                end_row_index: shopping_list_start_row - 2, # Product list only
+                start_column_index: 11, # Column L
+                end_column_index: 12
               },
-              cell: {
-                user_entered_format: {
-                  text_format: {
-                    bold: true
-                  }
-                }
+              cell: { user_entered_format: { number_format: { type: 'NUMBER', pattern: '#,##0.00' } } },
+              fields: 'userEnteredFormat.numberFormat'
+            }
+          }
+          
+          # 3. Units/Week Number Format (Column K, index 10)
+          requests << {
+            repeat_cell: {
+              range: {
+                sheet_id: 0,
+                start_row_index: 1, # Skip header
+                end_row_index: shopping_list_start_row - 2, # Product list only
+                start_column_index: 10, # Column K
+                end_column_index: 11
               },
-              fields: 'userEnteredFormat.textFormat.bold'
+              cell: { user_entered_format: { number_format: { type: 'NUMBER', pattern: '#,##0.00' } } },
+              fields: 'userEnteredFormat.numberFormat'
             }
           }
 
-          batch_request = Google::Apis::SheetsV4::BatchUpdateSpreadsheetRequest.new(
-            requests: [price_column_format, bold_request]
-          )
+          # 4. Bold Total Row
+          requests << {
+            repeat_cell: {
+              range: {
+                sheet_id: 0,
+                start_row_index: total_row_index - 1,
+                end_row_index: total_row_index,
+                start_column_index: 0,
+                end_column_index: 12
+              },
+              cell: { user_entered_format: { text_format: { bold: true } } },
+              fields: 'userEnteredFormat.textFormat.bold'
+            }
+          }
+          
+          # 5. Category Report Formatting
+          # Bold Header
+          requests << {
+            repeat_cell: {
+              range: {
+                sheet_id: 0,
+                start_row_index: cat_report_start_row - 1,
+                end_row_index: cat_report_start_row,
+                start_column_index: 0,
+                end_column_index: 2
+              },
+              cell: { user_entered_format: { text_format: { bold: true } } },
+              fields: 'userEnteredFormat.textFormat.bold'
+            }
+          }
+          
+          # Currency for Cost/Month column (Column B, index 1)
+          requests << {
+            repeat_cell: {
+              range: {
+                sheet_id: 0,
+                start_row_index: cat_report_start_row, # Start data AFTER header
+                end_row_index: cat_report_end_row,
+                start_column_index: 1, # Column B
+                end_column_index: 2
+              },
+              cell: { user_entered_format: { number_format: { type: 'CURRENCY', pattern: '"$"#,##0.00' } } },
+              fields: 'userEnteredFormat.numberFormat'
+            }
+          }
 
+          batch_request = Google::Apis::SheetsV4::BatchUpdateSpreadsheetRequest.new(requests: requests)
           @service.batch_update_spreadsheet(SHEET_ID, batch_request)
         end
 
@@ -541,8 +638,8 @@ module GoogleSheetsIntegration
     end
   end
 
-  def self.create_sync_client
-    SheetsSync.new
+  def self.create_sync_client(readonly: false)
+    SheetsSync.new(readonly: readonly)
   rescue StandardError => e
     puts "⚠️  Failed to initialize Google Sheets sync: #{e.message}"
     nil
