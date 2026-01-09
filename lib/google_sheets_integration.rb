@@ -341,6 +341,9 @@ module GoogleSheetsIntegration
 
         next unless prod_id
         
+        # Always canonicalize the URL to the standard ID-based format
+        item[:url] = database.class.canonical_url(prod_id)
+        
         sheet_prod_ids << prod_id
 
         # Check if item exists in database

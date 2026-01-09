@@ -50,6 +50,10 @@ class WalmartDatabase
     @items.where(status: 'active').select_map(:prod_id)
   end
 
+  def self.canonical_url(prod_id)
+    "https://www.walmart.com/ip/#{prod_id}"
+  end
+
   def bulk_deactivate_items(prod_ids)
     return if prod_ids.empty?
     

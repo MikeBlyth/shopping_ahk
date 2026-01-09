@@ -150,6 +150,7 @@ class SyncStatusTest < Minitest::Test
     assert_equal 1, items_table.inserts.length
     assert_equal 'active', items_table.inserts.first[:status]
     assert_equal '100', items_table.inserts.first[:prod_id]
+    assert_equal 'https://www.walmart.com/ip/100', items_table.inserts.first[:url]
   end
 
   def test_existing_inactive_item_reactivated
