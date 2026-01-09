@@ -39,14 +39,29 @@ class WalmartDatabase
   end
 
   def find_item_by_description(description)
-    @items.where(Sequel.ilike(:description, "%#{description}%")).first
+    @items.where(status: 'active').where(Sequel.ilike(:description, "%#{description}%")).first
   end
 
   def find_all_items_by_description(description)
-    @items.where(Sequel.ilike(:description, "%#{description}%")).order(:priority, :description).all
+    @items.where(status: 'active').where(Sequel.ilike(:description, "%#{description}%")).order(:priority, :description).all
   end
 
-  def create_item(prod_id:, url:, description:, modifier: nil, default_quantity: 1, priority: 1, subscribable: 0, category: nil)
+  def get_all_active_prod_ids
+    @items.where(status: 'active').select_map(:prod_id)
+  end
+
+  def bulk_deactivate_items(prod_ids)
+    return if prod_ids.empty?
+    
+    if @readonly
+      puts "🔒 Read-only mode: Skipping deactivation of #{prod_ids.length} items"
+      return
+    end
+
+    @items.where(prod_id: prod_ids).update(status: 'inactive', updated_at: Time.now)
+  end
+
+  def create_item(prod_id:, url:, description:, modifier: nil, default_quantity: 1, priority: 1, subscribable: 0, category: nil, status: 'active')
     if @readonly
       puts "🔒 Read-only mode: Skipping creation of item #{prod_id} (#{description})"
       return
@@ -63,7 +78,8 @@ class WalmartDatabase
       default_quantity: default_quantity,
       priority: normalized_priority,
       subscribable: subscribable,
-      category: category
+      category: category,
+      status: status
     )
   end
 
@@ -109,7 +125,8 @@ class WalmartDatabase
   end
 
   def get_all_items_with_stats
-    @items.left_join(:purchases, prod_id: :prod_id)
+    @items.where(Sequel[:items][:status] => 'active')
+          .left_join(:purchases, prod_id: :prod_id)
           .select_group(Sequel[:items][:id], Sequel[:items][:prod_id], Sequel[:items][:description], 
                         Sequel[:items][:modifier], Sequel[:items][:priority], Sequel[:items][:url], 
                         Sequel[:items][:subscribable], Sequel[:items][:category])

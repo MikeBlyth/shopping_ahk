@@ -1,7 +1,7 @@
 require 'minitest/autorun'
 require 'sequel'
-require_relative 'lib/database'
-require_relative 'lib/google_sheets_integration'
+require_relative '../lib/database'
+require_relative '../lib/google_sheets_integration'
 
 # --- MOCKS ---
 

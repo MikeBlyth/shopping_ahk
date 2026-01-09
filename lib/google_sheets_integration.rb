@@ -290,6 +290,9 @@ module GoogleSheetsIntegration
       synced_count = 0
       updated_count = 0
       deleted_count = 0
+      
+      # Track prod_ids seen in the sheet to identify items to deactivate later
+      sheet_prod_ids = []
 
       items.each do |item|
         # Handle deletion request
@@ -329,6 +332,8 @@ module GoogleSheetsIntegration
         end
 
         next unless prod_id
+        
+        sheet_prod_ids << prod_id
 
         # Check if item exists in database
         existing_item = database.find_item_by_prod_id(prod_id)
@@ -336,6 +341,9 @@ module GoogleSheetsIntegration
         if existing_item
           # Update existing item - only update non-empty values from sheet
           updates = { updated_at: Time.now }
+          
+          # Ensure item is marked active if it's in the sheet
+          updates[:status] = 'active' if existing_item[:status] != 'active'
 
           # Only update description if sheet has non-empty value
           updates[:description] = item[:item] unless item[:item].empty?
@@ -356,6 +364,7 @@ module GoogleSheetsIntegration
           updates[:category] = item[:category] unless item[:category].empty?
 
           # Only perform update if there are actual changes beyond timestamp
+          # Note: We check keys.length > 1 because updated_at is always there
           if updates.keys.length > 1
             database.update_item(prod_id, updates)
             updated_count += 1
@@ -370,7 +379,8 @@ module GoogleSheetsIntegration
             default_quantity: item[:quantity] || 1,
             priority: item[:priority],
             subscribable: item[:subscribable],
-            category: item[:category]
+            category: item[:category],
+            status: 'active'
           )
           synced_count += 1
         end
@@ -379,8 +389,17 @@ module GoogleSheetsIntegration
         # Purchase records are only created by actual purchase transactions
       end
 
-      puts "✅ Sync complete: #{synced_count} new items, #{updated_count} updated, #{deleted_count} deleted"
-      { new: synced_count, updated: updated_count, deleted: deleted_count }
+      # Handle deactivation of items not in the sheet
+      active_db_ids = database.get_all_active_prod_ids
+      ids_to_deactivate = active_db_ids - sheet_prod_ids
+      
+      if ids_to_deactivate.any?
+        database.bulk_deactivate_items(ids_to_deactivate)
+        puts "zzz Deactivated #{ids_to_deactivate.length} items not found in sheet"
+      end
+
+      puts "✅ Sync complete: #{synced_count} new, #{updated_count} updated, #{deleted_count} deleted, #{ids_to_deactivate.length} deactivated"
+      { new: synced_count, updated: updated_count, deleted: deleted_count, deactivated: ids_to_deactivate.length }
     end
 
     def sync_from_database(database, shopping_list_data = [])
