@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS items (
     modifier TEXT,                           -- Size, brand, or other modifier
     default_quantity INTEGER DEFAULT 1,      -- Default quantity to purchase
     priority INTEGER DEFAULT 0,              -- Shopping priority (higher = more important)
+    status VARCHAR(20) DEFAULT 'active',     -- 'active' or 'inactive'
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
