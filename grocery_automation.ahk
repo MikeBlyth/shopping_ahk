@@ -8,6 +8,8 @@
 
 ; Use fast typing of URL 
 SendMode "Input"
+; Match window titles anywhere in the string
+SetTitleMatchMode 2
 
 ; Hotkeys
 ^+q::{
@@ -85,16 +87,22 @@ LoadPriceCharacters()
 LoadSubscribePattern()
 
 ; Automatically find and select Walmart window
-TargetWindowHandle := WinExist("Walmart")
+WriteDebug("DEBUG: Starting window search...")
+TargetWindowHandle := WinExist("Baseline")
+WriteDebug("DEBUG: Initial WinExist('Baseline') returned: " . (TargetWindowHandle ? TargetWindowHandle : "0"))
+
 if !TargetWindowHandle {
     ; No Walmart window found - find any browser and open new tab
+    WriteDebug("DEBUG: Baseline window not found, calling FindAndOpenWalmart...")
     TargetWindowHandle := FindAndOpenWalmart()
     if !TargetWindowHandle {
+        WriteDebug("ERROR: FindAndOpenWalmart returned 0. Exiting.")
         MsgBox("Could not find a browser window or open Walmart. Please open a browser first.")
         ExitApp
     }
 }
 WinActivate(TargetWindowHandle)
+WriteDebug("DEBUG: Window activated. ID: " . TargetWindowHandle)
 
 ; Auto-start after window selection
 UserReady := true
@@ -326,11 +334,14 @@ NavigateAndShowDialog(param) {
     ; Navigate to URL (background loading)
     WinActivate(TargetWindowHandle)
     WinWaitActive(TargetWindowHandle)
-    A_Clipboard := "" ; Clear clipboard before navigation
+    
+    ; Clear server data before navigation to ensure we get fresh data
+    ClearServerData()
+    
     PasteURL(url)
     
-    ; Wait for product data from browser extension via clipboard
-    walmartProductData := WaitForClipboardJSON(20) ; Increased timeout for page load and script execution
+    ; Wait for product data from browser extension via local server
+    walmartProductData := WaitForServerJSON(20) ; Increased timeout for page load and script execution
     
     prefill_price := ""
     prefill_description := item_description ; Default to original item description
@@ -686,32 +697,59 @@ SendError(errorValue) {
     WriteResponseJSON(response_obj)
 }
 
-; --- Clipboard Data Handling Functions ---
-WaitForClipboardJSON(timeoutSeconds := 10) {
+; --- Server Data Handling Functions ---
+ClearServerData() {
+    try {
+        whr := ComObject("WinHttp.WinHttpRequest.5.1")
+        whr.SetTimeouts(500, 500, 500, 500)
+        whr.Open("DELETE", "http://127.0.0.1:4567/walmart_product", false)
+        whr.Send()
+        
+        if (whr.Status == 200) {
+            WriteDebug("ClearServerData: Successfully cleared server data.")
+            return true
+        } else {
+            WriteDebug("ClearServerData: Server returned status " . whr.Status)
+            return false
+        }
+    } catch as e {
+        WriteDebug("ClearServerData: Error clearing server data: " . e.message)
+        return false
+    }
+}
+
+WaitForServerJSON(timeoutSeconds := 10) {
     startTime := A_TickCount
-    clipboardData := ""
     
     Loop {
-        clipboardData := A_Clipboard
-        ; Check if clipboard is not empty and starts with JSON marker
-        if (clipboardData != "" && SubStr(clipboardData, 1, 1) = "{" && InStr(clipboardData, "`"walmart_product`":true")) {
-            try {
-                parsedData := jsongo.Parse(clipboardData)
-                ; Double check the marker
-                if (parsedData.Has("walmart_product") && parsedData["walmart_product"] = true) {
-                    WriteDebug("WaitForClipboardJSON: Successfully parsed Walmart product data from clipboard.")
-                    return parsedData
+        try {
+            whr := ComObject("WinHttp.WinHttpRequest.5.1")
+            ; Set timeouts: Resolve, Connect, Send, Receive
+            whr.SetTimeouts(500, 500, 500, 500)
+            whr.Open("GET", "http://127.0.0.1:4567/walmart_product", false)
+            whr.Send()
+            
+            if (whr.Status == 200) {
+                responseText := whr.ResponseText
+                if (responseText != "" && responseText != "{}") {
+                    parsedData := jsongo.Parse(responseText)
+                    if (parsedData.Has("walmart_product") && parsedData["walmart_product"] = true) {
+                        WriteDebug("WaitForServerJSON: Successfully retrieved Walmart product data from server.")
+                        return parsedData
+                    }
                 }
-            } catch as e {
-                ; Not valid JSON or not our expected format yet, continue waiting
-                WriteDebug("WaitForClipboardJSON: Clipboard contains non-walmart JSON or malformed JSON: " . e.message)
+            }
+        } catch as e {
+            ; Only log errors occasionally to avoid flooding debug log
+            if (Mod(A_Index, 10) == 0) {
+                WriteDebug("WaitForServerJSON: Error fetching from server: " . e.message)
             }
         }
         
         Sleep(500) ; Wait 500ms before checking again
         
         if ((A_TickCount - startTime) / 1000 > timeoutSeconds) {
-            WriteDebug("WaitForClipboardJSON: Timeout waiting for valid Walmart product data in clipboard.")
+            WriteDebug("WaitForServerJSON: Timeout waiting for valid Walmart product data from server.")
             return false
         }
     }
@@ -767,23 +805,25 @@ ShowAddItemDialog(suggestedName) {
 ShowAddItemDialogHotkey() {
     WriteDebug("ShowAddItemDialogHotkey called")
     
+    ; Clear any old server data to ensure we get fresh info for the CURRENT page
+    ClearServerData()
+    
     ; Get current URL (silent - doesn't write to response file)
     currentUrl := GetCurrentURLSilent()
     WriteDebug("Current URL captured: " . currentUrl)
     
-    ; Try to get data from browser extension first
-    A_Clipboard := "" ; Clear clipboard before checking
-    walmartProductData := WaitForClipboardJSON(5) ; Wait 5s for extension data
+    ; Try to get data from browser extension first via local server
+    walmartProductData := WaitForServerJSON(5) ; Wait 5s for extension data
 
     if (walmartProductData) {
-        WriteDebug("ShowAddItemDialogHotkey: Received product data from clipboard.")
+        WriteDebug("ShowAddItemDialogHotkey: Received product data from server.")
         prefill_price := walmartProductData.Has("price") ? walmartProductData["price"] : ""
         prefill_description := walmartProductData.Has("description") ? walmartProductData["description"] : ""
         
         ; Show dialog with pre-filled values from clipboard
         ShowAddItemDialogWithDefaults(prefill_description, currentUrl, prefill_price)
     } else {
-        WriteDebug("ShowAddItemDialogHotkey: No clipboard data. Falling back to Ruby lookup.")
+        WriteDebug("ShowAddItemDialogHotkey: No server data. Falling back to Ruby lookup.")
         ; Original fallback logic: Show dialog and ask Ruby for info
         ShowAddItemDialogWithDefaults("< Looking up... >", currentUrl)
         SendLookupRequest(currentUrl)
@@ -1206,22 +1246,28 @@ StartPurchaseDetection() {
 
 ; Function to find browser and open new Walmart tab
 FindAndOpenWalmart() {
+    WriteDebug("DEBUG: Inside FindAndOpenWalmart...")
     ; Try to find any common browser window
     browserHandle := WinExist('Baseline')
+    WriteDebug("DEBUG: WinExist('Baseline') inside function returned: " . (browserHandle ? browserHandle : "0"))
+    
     if browserHandle {
         ; Set global handle for OpenURL to use
         global TargetWindowHandle := browserHandle
 
         ; Activate browser
+        WriteDebug("DEBUG: Activating browser window...")
         WinActivate(browserHandle)
         WinWaitActive(browserHandle, , 2)
 
         ; Open new tab
+        WriteDebug("DEBUG: Sending Ctrl+T to open new tab...")
         Send("^t")  ; Ctrl+T for new tab
         Sleep(500)
 
         ; Use OpenURL to navigate to Walmart (without Ruby messaging)
         try {
+            WriteDebug("DEBUG: Navigating to walmart.com...")
             PasteURL("https://walmart.com")
             Sleep(2000)  ; Wait for page to start loading
             FileAppend("Successfully opened Walmart tab`n", "command_debug.txt")

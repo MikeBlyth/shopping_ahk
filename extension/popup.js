@@ -4,13 +4,16 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // Load the saved state
   chrome.storage.local.get(['detectorEnabled'], function (result) {
-    updateButton(result.detectorEnabled);
+    // Default to false if undefined
+    const enabled = result.detectorEnabled !== undefined ? result.detectorEnabled : false;
+    updateButton(enabled);
   });
 
   // Toggle button click listener
   toggleButton.addEventListener('click', function () {
     chrome.storage.local.get(['detectorEnabled'], function (result) {
-      const newStatus = !result.detectorEnabled;
+      const currentStatus = result.detectorEnabled !== undefined ? result.detectorEnabled : false;
+      const newStatus = !currentStatus;
       chrome.storage.local.set({ detectorEnabled: newStatus }, function () {
         updateButton(newStatus);
         // Send a message to the content script to update its status

@@ -71,17 +71,23 @@ function extractWalmartProductData() {
     if (addToCartSection && addToCartSection.textContent.includes('Out of stock')) {
         data.outOfStock = true;
     }
+
+    data.url = window.location.href;
     
     return data;
 }
 
-// Function to copy data to clipboard
-function copyToClipboard(data) {
-    const jsonData = JSON.stringify(data);
-    navigator.clipboard.writeText(jsonData).then(function() {
-        console.log('✅ Walmart product data copied to clipboard:', data);
-    }).catch(function(err) {
-        console.error('❌ Could not copy data to clipboard:', err);
+// Function to send data to local server
+function sendToLocalServer(data) {
+    chrome.runtime.sendMessage({
+        action: 'sendToServer',
+        data: data
+    }, function(response) {
+        if (chrome.runtime.lastError) {
+            console.error('❌ Error sending message to background:', chrome.runtime.lastError);
+        } else {
+            console.log('✅ Message sent to background:', response);
+        }
     });
 }
 
@@ -91,10 +97,10 @@ function runDetection() {
 
     const productData = extractWalmartProductData();
     
-    // Only copy if we found at least a description and price
+    // Only send if we found at least a description and price
     if (productData.description && productData.price) {
-        copyToClipboard(productData);
-        // Disconnect observer after successfully finding and copying data to prevent re-triggering on the same page
+        sendToLocalServer(productData);
+        // Disconnect observer after successfully finding and sending data
         if (observer) {
             observer.disconnect();
             console.log('👀 Observer disconnected after successful detection.');
@@ -115,8 +121,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         const testData = extractWalmartProductData();
         console.log('🧪 Test run data:', testData);
         if (testData.description && testData.price) {
-            copyToClipboard(testData);
-            sendResponse({ status: 'Test successful, data copied.' });
+            sendToLocalServer(testData);
+            sendResponse({ status: 'Test successful, data sent to server.' });
         } else {
             sendResponse({ status: 'Test failed, could not find product data.' });
         }
@@ -127,6 +133,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 chrome.storage.local.get(['detectorEnabled'], function (result) {
     detectorEnabled = result.detectorEnabled;
     console.log('Initial detector status:', detectorEnabled);
+    if (detectorEnabled === undefined) {
+         console.log('Detector status undefined, defaulting to false.');
+    }
     if (detectorEnabled) {
         // Since content scripts can load at different times, we use a MutationObserver 
         // to wait for the target elements to appear on the page.
@@ -140,6 +149,7 @@ const observer = new MutationObserver((mutationsList, observer) => {
     // Look for changes that might indicate the product data is now available.
     // A simple check for the main-title element is a good starting point.
     if (document.getElementById('main-title')) {
+        // console.log('Mutation detected main-title, attempting detection...'); // excessive logging commented out
         runDetection();
     }
 });
