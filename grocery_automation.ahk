@@ -86,8 +86,9 @@ CheckAndStartServer() {
     try {
         whr := ComObject("WinHttp.WinHttpRequest.5.1")
         whr.SetTimeouts(500, 500, 500, 500)
-        whr.Open("GET", "http://127.0.0.1:4567/walmart_product", false)
+        whr.Open("GET", "http://127.0.0.1:54567/walmart_product", true)
         whr.Send()
+        whr.WaitForResponse(1)
         
         if (whr.Status == 200) {
             WriteDebug("Server is already running.")
@@ -107,8 +108,11 @@ CheckAndStartServer() {
             Sleep(1000)
             try {
                 whr := ComObject("WinHttp.WinHttpRequest.5.1")
-                whr.Open("GET", "http://127.0.0.1:4567/walmart_product", false)
+                whr.SetTimeouts(500, 500, 500, 500)
+                whr.Open("GET", "http://127.0.0.1:54567/walmart_product", true)
                 whr.Send()
+                whr.WaitForResponse(1)
+                
                 if (whr.Status == 200) {
                     WriteDebug("Server started and ready.")
                     return
@@ -442,8 +446,9 @@ PollForAddToCartClick(gui, addButton) {
     try {
         whr := ComObject("WinHttp.WinHttpRequest.5.1")
         whr.SetTimeouts(500, 500, 500, 500)
-        whr.Open("GET", "http://127.0.0.1:4567/walmart_product", false)
+        whr.Open("GET", "http://127.0.0.1:54567/walmart_product", true)
         whr.Send()
+        whr.WaitForResponse(1)
         
         if (whr.Status == 200) {
             responseText := whr.ResponseText
@@ -784,8 +789,9 @@ ClearServerData() {
     try {
         whr := ComObject("WinHttp.WinHttpRequest.5.1")
         whr.SetTimeouts(500, 500, 500, 500)
-        whr.Open("DELETE", "http://127.0.0.1:4567/walmart_product", false)
+        whr.Open("DELETE", "http://127.0.0.1:54567/walmart_product", true)
         whr.Send()
+        whr.WaitForResponse(1)
         
         if (whr.Status == 200) {
             WriteDebug("ClearServerData: Successfully cleared server data.")
@@ -808,8 +814,9 @@ WaitForServerJSON(timeoutSeconds := 10) {
             whr := ComObject("WinHttp.WinHttpRequest.5.1")
             ; Set timeouts: Resolve, Connect, Send, Receive
             whr.SetTimeouts(500, 500, 500, 500)
-            whr.Open("GET", "http://127.0.0.1:4567/walmart_product", false)
+            whr.Open("GET", "http://127.0.0.1:54567/walmart_product", true)
             whr.Send()
+            whr.WaitForResponse(1)
             
             if (whr.Status == 200) {
                 responseText := whr.ResponseText

@@ -2,8 +2,14 @@ require 'sinatra'
 require 'json'
 
 # Configure Sinatra
-set :port, 4567
+set :port, 54567
 set :bind, '127.0.0.1'
+
+# Graceful Exit
+trap("INT") { 
+  puts "Closing IPC sockets..."
+  exit 
+}
 
 # Global storage
 $current_students = []

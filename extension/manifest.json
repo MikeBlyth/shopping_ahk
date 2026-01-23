@@ -4,7 +4,7 @@
   "manifest_version": 3,
   "description": "Automatically detects product information on Walmart pages and copies it to the clipboard.",
   "permissions": ["storage", "clipboardWrite", "activeTab"],
-  "host_permissions": ["http://127.0.0.1:4567/*"],
+  "host_permissions": ["http://127.0.0.1:54567/*"],
   "background": {
     "service_worker": "background.js"
   },

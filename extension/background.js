@@ -2,7 +2,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'sendToServer') {
         console.log('📤 Background script sending data to server...', request.data);
         
-        fetch('http://127.0.0.1:4567/walmart_product', {
+        fetch('http://127.0.0.1:54567/walmart_product', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
