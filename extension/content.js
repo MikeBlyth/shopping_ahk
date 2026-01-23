@@ -15,11 +15,24 @@ function extractWalmartProductData() {
         data.description = descriptionElement.textContent.trim();
     }
 
-    const priceElement = document.querySelector('[itemprop="price"]');
+    // Try multiple selectors for price
+    const priceElement = document.querySelector('[itemprop="price"]') || 
+                         document.querySelector('[data-seo-id="hero-price"]');
+    
     if (priceElement) {
         const priceText = priceElement.textContent.trim();
-        data.price = parseFloat(priceText.replace(/[^0-9.]/g, ''));
-        if (isNaN(data.price)) data.price = null;
+        // Look for $ followed by numbers (allows for commas and decimals)
+        const priceMatch = priceText.match(/\$\s*([0-9,]+(?:\.[0-9]+)?)/);
+        
+        if (priceMatch && priceMatch[1]) {
+            // Remove commas and parse
+            data.price = parseFloat(priceMatch[1].replace(/,/g, ''));
+        } else {
+            // Fallback: strip everything except digits and dots (risky for "2 pack")
+            // Only use if no $ found
+            const fallbackPrice = parseFloat(priceText.replace(/[^0-9.]/g, ''));
+            if (!isNaN(fallbackPrice)) data.price = fallbackPrice;
+        }
     }
 
     // --- Improved Product ID Extraction Logic with Logging ---
@@ -86,7 +99,10 @@ function sendToLocalServer(data) {
         if (chrome.runtime.lastError) {
             console.error('❌ Error sending message to background:', chrome.runtime.lastError);
         } else {
-            console.log('✅ Message sent to background:', response);
+            console.log('✅ Background script responded:', response);
+            if (response && response.status === 'error') {
+                console.error('❌ Server-side error:', response.error);
+            }
         }
     });
 }
@@ -157,3 +173,34 @@ const observer = new MutationObserver((mutationsList, observer) => {
 // Start observing the document body for changes
 observer.observe(document.body, { childList: true, subtree: true });
 console.log('👀 Walmart product data observer started.');
+
+// --- Add to Cart Click Detection ---
+document.addEventListener('click', function(event) {
+    if (!detectorEnabled) return;
+
+    let target = event.target;
+    // Traverse up to find button if user clicked on an icon or span inside
+    while (target && target !== document.body) {
+        if (target.tagName === 'BUTTON') {
+            const buttonText = target.textContent.toLowerCase();
+            const testId = target.getAttribute('data-test');
+            const automationId = target.getAttribute('data-automation-id');
+
+            // Check for "Add to cart" indicators
+            if (buttonText.includes('add to cart') || 
+                testId === 'add-to-cart-btn' || 
+                automationId === 'add-to-cart') {
+                
+                console.log('🛒 "Add to cart" clicked!');
+                
+                // Get fresh data and add click timestamp
+                const productData = extractWalmartProductData();
+                productData.addToCartClicked = Date.now();
+                
+                sendToLocalServer(productData);
+                return;
+            }
+        }
+        target = target.parentElement;
+    }
+}, true); // Use capturing phase to catch it early

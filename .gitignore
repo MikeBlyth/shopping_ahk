@@ -7,6 +7,8 @@ ahk_status.txt
 ahk_command.txt
 ahk_response.txt
 ahk_debug.txt
+command_debug.txt
+read_me.txt
 
 
 # Test files

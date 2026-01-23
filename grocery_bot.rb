@@ -1060,10 +1060,9 @@ class WalmartGroceryAssistant
     alternatives.sort_by! { |item| normalize_priority(item[:priority]) }
 
     if alternatives.empty?
-      @ahk.show_message("Original item is out of stock and no database alternatives were found for '#{original_item_name}'.")
-      update_shopping_list_item(original_item_name, purchased: '❌', itemno: original_db_item[:prod_id], price: 0.0)
-      puts "⏭️ Item '#{original_item_name}' marked as skipped due to no alternatives."
-      return nil
+      @ahk.show_message("Original item is out of stock and no database alternatives were found for '#{original_item_name}'.\n\nProceeding to search for a new item.")
+      puts "⏭️ No database alternatives for '#{original_item_name}'. Initiating search."
+      return :search_new_item
     end
 
     # Prepare a more descriptive title

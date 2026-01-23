@@ -80,6 +80,50 @@ try {
     ; Ignore errors if file doesn't exist
 }
 
+; --- Server Management ---
+CheckAndStartServer() {
+    WriteDebug("Checking if Ruby server is running...")
+    try {
+        whr := ComObject("WinHttp.WinHttpRequest.5.1")
+        whr.SetTimeouts(500, 500, 500, 500)
+        whr.Open("GET", "http://127.0.0.1:4567/walmart_product", false)
+        whr.Send()
+        
+        if (whr.Status == 200) {
+            WriteDebug("Server is already running.")
+            return
+        }
+    } catch {
+        WriteDebug("Server not responding. Starting server...")
+    }
+
+    ; Server is not running, start it
+    try {
+        Run("ruby server.rb", , "Hide")
+        WriteDebug("Launched ruby server.rb")
+        
+        ; Wait for server to become ready
+        Loop 10 {
+            Sleep(1000)
+            try {
+                whr := ComObject("WinHttp.WinHttpRequest.5.1")
+                whr.Open("GET", "http://127.0.0.1:4567/walmart_product", false)
+                whr.Send()
+                if (whr.Status == 200) {
+                    WriteDebug("Server started and ready.")
+                    return
+                }
+            }
+        }
+        MsgBox("Failed to start Ruby server. Please run 'ruby server.rb' manually.")
+    } catch as e {
+        MsgBox("Error launching server: " . e.Message)
+    }
+}
+
+; Ensure server is running before proceeding
+CheckAndStartServer()
+
 ; Load price character library for OCR price detection
 LoadPriceCharacters()
 
@@ -88,12 +132,12 @@ LoadSubscribePattern()
 
 ; Automatically find and select Walmart window
 WriteDebug("DEBUG: Starting window search...")
-TargetWindowHandle := WinExist("Baseline")
-WriteDebug("DEBUG: Initial WinExist('Baseline') returned: " . (TargetWindowHandle ? TargetWindowHandle : "0"))
+TargetWindowHandle := WinExist("Walmart")
+WriteDebug("DEBUG: Initial WinExist('Walmart') returned: " . (TargetWindowHandle ? TargetWindowHandle : "0"))
 
 if !TargetWindowHandle {
-    ; No Walmart window found - find any browser and open new tab
-    WriteDebug("DEBUG: Baseline window not found, calling FindAndOpenWalmart...")
+    ; No Walmart window found - try to find Baseline browser and open new tab
+    WriteDebug("DEBUG: Walmart window not found, calling FindAndOpenWalmart...")
     TargetWindowHandle := FindAndOpenWalmart()
     if !TargetWindowHandle {
         WriteDebug("ERROR: FindAndOpenWalmart returned 0. Exiting.")
@@ -386,6 +430,46 @@ NavigateAndShowDialog(param) {
     ShowPurchaseDialog(item_name, is_known, prefill_description, default_quantity, prefill_price, prefill_out_of_stock)
 }
 
+; --- Add to Cart Polling ---
+PollForAddToCartClick(gui, addButton) {
+    static lastCheckTime := 0
+    
+    ; Don't check too often
+    if (A_TickCount - lastCheckTime < 500)
+        return
+    lastCheckTime := A_TickCount
+
+    try {
+        whr := ComObject("WinHttp.WinHttpRequest.5.1")
+        whr.SetTimeouts(500, 500, 500, 500)
+        whr.Open("GET", "http://127.0.0.1:4567/walmart_product", false)
+        whr.Send()
+        
+        if (whr.Status == 200) {
+            responseText := whr.ResponseText
+            if (responseText != "" && responseText != "{}") {
+                data := jsongo.Parse(responseText)
+                
+                ; Check if addToCartClicked exists and is recent (within last 30 seconds)
+                if (data.Has("addToCartClicked") && data["addToCartClicked"] > 0) {
+                    timeDiff := A_NowUTC ; This is complicated in AHK v2 without a library for JS timestamp
+                    ; Simplified: just check if the flag exists for now, or trust the extension sent it recently
+                    
+                    ; Update button style
+                    addButton.Text := "✅ Add & Purchase"
+                    addButton.Opt("BackgroundGreen cWhite")
+                    
+                    ; Stop polling once detected
+                    SetTimer(, 0) 
+                    WriteDebug("Detected Add to Cart click via server!")
+                }
+            }
+        }
+    } catch as e {
+        ; Ignore network errors during polling
+    }
+}
+
 ShowPurchaseDialog(item_name, is_known, item_description, default_quantity, prefill_price := "", prefill_out_of_stock := false) {
     ; Create dialog
     purchaseGui := Gui("+AlwaysOnTop", "Item: " . item_name)
@@ -437,11 +521,6 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity, pref
     skipButton.OnEvent("Click", (*) => SkipClickHandler(purchaseGui))
     searchButton.OnEvent("Click", (*) => SearchAgainClickHandler(purchaseGui))
     
-    ; Store purchase button and price edit references globally for click detection
-    global CurrentPurchaseButton := addButton
-    global CurrentPriceEdit := priceEdit
-    FileAppend("ShowPurchaseDialog: Set CurrentPriceEdit reference`n", "command_debug.txt")
-    
     ; Clear any dialog references that might interfere with lookup
     global CurrentAddItemDialog := ""
     global CurrentDialogControls := ""
@@ -449,13 +528,19 @@ ShowPurchaseDialog(item_name, is_known, item_description, default_quantity, pref
     ; Show dialog immediately 
     purchaseGui.Show("x100")
 
-    ; Start purchase detection and price detection immediately
-    ; Only start price detection if not pre-filled and not out of stock
-    if (prefill_price == "" && !prefill_out_of_stock) {
-        SetTimer(StartDetectionForPurchaseDialog.Bind(priceEdit), -100)  ; Run once after 100ms delay
-    } else if (prefill_out_of_stock) {
+    if (prefill_out_of_stock) {
         ; If out of stock, disable the Add/Override button visually
         addButton.Enabled := false
+    } else {
+        ; Start polling for "Add to Cart" click
+        ; Bind the function to the specific GUI and Button
+        pollFunc := PollForAddToCartClick.Bind(purchaseGui, addButton)
+        SetTimer(pollFunc, 1000) ; Check every 1 second
+        
+        ; Store the timer function in the GUI object so we can stop it later (optional, destroying GUI stops timers bound to it?)
+        ; Actually, destroying the GUI doesn't automatically stop a bound SetTimer in all cases, better to be safe.
+        purchaseGui.OnEvent("Close", (*) => SetTimer(pollFunc, 0))
+        ; Also stop it when any button is clicked (handled in common cleanup if possible, or just let it run until destroy)
     }
 }
 
@@ -505,7 +590,6 @@ PurchaseClickHandler(gui) {
         WriteResponseJSON(response_obj)
     }
     
-    StopPriceDetection()
     gui.Destroy()
 }
 
@@ -521,7 +605,6 @@ SkipClickHandler(gui) {
         SendStatus("skipped")
     }
     
-    StopPriceDetection()
     gui.Destroy()
 }
 
@@ -531,7 +614,6 @@ SearchAgainClickHandler(gui) {
     response_obj["type"] := "choice"
     response_obj["value"] := 999  ; Use high number to indicate "search for new item" option
     WriteResponseJSON(response_obj)
-    StopPriceDetection()
     gui.Destroy()
 }
 
@@ -915,20 +997,17 @@ ShowAddItemDialogWithDefaults(suggestedName, currentUrl, prefill_price := "") {
     skipButton.OnEvent("Click", (*) => SkipItemClickHandler(addItemGui))
     cancelButton.OnEvent("Click", (*) => CancelItemClickHandler(addItemGui))
     
-    ; Store purchase button and price edit references globally for click detection
-    global CurrentPurchaseButton := addButton
-    global CurrentPriceEdit := priceEdit
-    WriteDebug("ShowAddItemDialog: Set CurrentPriceEdit reference")
-    
     ; Add cleanup handler when dialog is closed
     addItemGui.OnEvent("Close", (*) => CleanupDialogReferences())
     
     ; Show dialog immediately (positioned 400px left of center)
     dialogX := 100 
     addItemGui.Show("x" . dialogX)
-
-    ; Start purchase detection and price detection immediately
-    SetTimer(StartDetectionForAddItemDialog.Bind(priceEdit), -100)  ; Run once after 100ms delay
+    
+    ; Start polling for "Add to Cart" click
+    pollFunc := PollForAddToCartClick.Bind(addItemGui, addButton)
+    SetTimer(pollFunc, 1000)
+    addItemGui.OnEvent("Close", (*) => SetTimer(pollFunc, 0))
 }
 
 ; Event handler functions for Add Item dialog
@@ -1000,7 +1079,6 @@ AddAndPurchaseClickHandler(gui) {
     response_obj["purchase_quantity"] := Integer(purchaseQuantity)
     
     WriteResponseJSON(response_obj)
-    StopPriceDetection()
     CleanupDialogReferences()
     gui.Destroy()
     
@@ -1059,7 +1137,6 @@ AddOnlyClickHandler(gui) {
     response_obj["purchase_quantity"] := 0
 
     WriteResponseJSON(response_obj)
-    StopPriceDetection()
     CleanupDialogReferences()
     gui.Destroy()
     
@@ -1069,14 +1146,12 @@ AddOnlyClickHandler(gui) {
 
 SkipItemClickHandler(gui) {
     SendStatus("skipped")
-    StopPriceDetection()
     CleanupDialogReferences()
     gui.Destroy()
 }
 
 CancelItemClickHandler(gui) {
     SendStatus("cancelled")
-    StopPriceDetection()
     CleanupDialogReferences()
     ; Silent close - no messages
     gui.Destroy()
@@ -1173,81 +1248,10 @@ PerformQuit() {
     ExitApp()
 }
 
-; Purchase Detection Functions
-StartPurchaseDetection() {
-    global ButtonRegion, ButtonFound
-    
-    FileAppend("StartPurchaseDetection called`n", "command_debug.txt")
-    
-    ; Reset for new page
-    ButtonFound := false
-    
-    ; Small delay for page loading before searching
-    FileAppend("About to call FindAddToCartButton`n", "command_debug.txt")
-    ; Search for Add to Cart button on page  
-    result := FindAddToCartButton(5000, TargetWindowHandle)  ; 5 second search
-    
-    FileAppend("FindAddToCartButton returned: found=" . result.found . "`n", "command_debug.txt")
-    
-    if (result.found) {
-        ButtonRegion := result.clickRegion
-        ButtonFound := true
-        FileAppend("Button found! Region set to: " . ButtonRegion.left . "," . ButtonRegion.top . " to " . ButtonRegion.right . "," . ButtonRegion.bottom . "`n", "command_debug.txt")
-        FileAppend("DETECTION STATE: ButtonFound=" . ButtonFound . ", CurrentPurchaseButton=" . (CurrentPurchaseButton ? "SET" : "NOT SET") . "`n", "command_debug.txt")
-    } else {
-        FileAppend("Button NOT found`n", "command_debug.txt")
-        FileAppend("DETECTION STATE: ButtonFound=false, CurrentPurchaseButton=" . (CurrentPurchaseButton ? "SET" : "NOT SET") . "`n", "command_debug.txt")
-    }
-    ; If not found, ButtonFound stays false - user can click Override
-}
-
-; Global click handler for purchase detection
-~LButton:: {
-    global ButtonRegion, ButtonFound, CurrentPurchaseButton
-    
-    ; Get click position for logging
-    CoordMode("Mouse", "Screen")
-    MouseGetPos(&mouseX, &mouseY)
-    
-    ; Debug: Always log clicks to see if hotkey is working
-    FileAppend("CLICK HOTKEY: Mouse click detected at " . mouseX . "," . mouseY . "`n", "command_debug.txt")
-    
-    ; Debug: Log all clicks when button detection is active
-    if (ButtonFound && CurrentPurchaseButton) {
-        FileAppend("CLICK DEBUG: Mouse click at " . mouseX . "," . mouseY . " - ButtonFound=" . ButtonFound . "`n", "command_debug.txt")
-        FileAppend("CLICK DEBUG: Button region " . ButtonRegion.left . "," . ButtonRegion.top . " to " . ButtonRegion.right . "," . ButtonRegion.bottom . "`n", "command_debug.txt")
-        
-        ; Check if click is in Add to Cart button region
-        inRegion := (mouseX >= ButtonRegion.left && mouseX <= ButtonRegion.right && 
-                     mouseY >= ButtonRegion.top && mouseY <= ButtonRegion.bottom)
-        
-        FileAppend("CLICK DEBUG: inRegion=" . inRegion . "`n", "command_debug.txt")
-        
-        if (inRegion) {
-            FileAppend("CLICK DEBUG: Add to Cart click detected! Updating button state`n", "command_debug.txt")
-            
-            ; Change button state
-            CurrentPurchaseButton.Text := "✅ Add & Purchase"
-            CurrentPurchaseButton.Opt("BackgroundGreen cWhite")
-            
-            ; Price detection already started when dialog opened
-            ; Just update button appearance to confirm cart addition
-            FileAppend("Add to Cart click detected - price detection already active`n", "command_debug.txt")
-        }
-    } else {
-        ; Debug: Log when click detection is not active
-        if (!ButtonFound) {
-            FileAppend("CLICK DEBUG: Click ignored - ButtonFound=false`n", "command_debug.txt")
-        } else if (!CurrentPurchaseButton) {
-            FileAppend("CLICK DEBUG: Click ignored - CurrentPurchaseButton not set`n", "command_debug.txt")
-        }
-    }
-}
-
 ; Function to find browser and open new Walmart tab
 FindAndOpenWalmart() {
     WriteDebug("DEBUG: Inside FindAndOpenWalmart...")
-    ; Try to find any common browser window
+    ; Try to find Baseline browser
     browserHandle := WinExist('Baseline')
     WriteDebug("DEBUG: WinExist('Baseline') inside function returned: " . (browserHandle ? browserHandle : "0"))
     
@@ -1281,105 +1285,6 @@ FindAndOpenWalmart() {
 
     FileAppend("No browser windows found`n", "command_debug.txt")
     return 0
-}
-
-; Helper functions for timer callbacks
-StartDetectionForPurchaseDialog(priceEdit) {
-    StartPurchaseDetection()
-    StartPriceDetection(priceEdit)
-}
-
-StartDetectionForAddItemDialog(priceEdit) {
-    StartPurchaseDetection()
-    StartPriceDetection(priceEdit)
-}
-
-; Price Detection Functions
-StartPriceDetection(priceEditControl) {
-    global PriceDetectionTimer, PriceDetectionActive, CurrentPriceEdit, PriceDetectionStartTime
-    
-    FileAppend("StartPriceDetection called`n", "command_debug.txt")
-    
-    ; Stop any existing price detection
-    StopPriceDetection()
-    
-    ; Set up new price detection
-    CurrentPriceEdit := priceEditControl
-    PriceDetectionActive := true
-    PriceDetectionStartTime := A_TickCount  ; Record start time in milliseconds
-    
-    ; Start timer to check for prices every 500ms
-    PriceDetectionTimer := SetTimer(() => CheckForPrice(), 500)
-    
-    FileAppend("Price detection timer started - will stop after 4 seconds`n", "command_debug.txt")
-}
-
-StopPriceDetection() {
-    global PriceDetectionTimer, PriceDetectionActive
-    
-    if (PriceDetectionTimer) {
-        SetTimer(PriceDetectionTimer, 0)  ; Stop timer
-        PriceDetectionTimer := ""
-        FileAppend("Price detection timer stopped`n", "command_debug.txt")
-    }
-    
-    PriceDetectionActive := false
-    ; Note: Don't clear CurrentPriceEdit here - let new dialogs set it when they open
-}
-
-CheckForPrice() {
-    global CurrentPriceEdit, PriceDetectionActive, PriceDetectionStartTime
-    
-    ; Stop if detection is no longer active or dialog closed
-    if (!PriceDetectionActive || !CurrentPriceEdit) {
-        StopPriceDetection()
-        return
-    }
-    
-    ; Check if 4 seconds have elapsed (4000 milliseconds)
-    elapsedTime := A_TickCount - PriceDetectionStartTime
-    if (elapsedTime > 4000) {
-        FileAppend("Price detection timeout after 4 seconds - stopping detection`n", "command_debug.txt")
-        StopPriceDetection()
-        return
-    }
-    
-    ; Check if user has manually entered a price - if so, stop detection
-    currentText := Trim(CurrentPriceEdit.Text)
-    if (currentText != "") {
-        FileAppend("User entered price manually: '" . currentText . "' - stopping detection`n", "command_debug.txt")
-        StopPriceDetection()
-        return
-    }
-    
-    ; Search for price on screen using same region as test script (right 25% of screen)
-    screenWidth := A_ScreenWidth
-    screenHeight := A_ScreenHeight
-    
-    ; Define search area: right 25%, vertically 25-75%
-    x1 := Floor(screenWidth * 0.75)
-    x2 := screenWidth
-    y1 := Floor(screenHeight * 0.25)
-    y2 := Floor(screenHeight * 0.75)
-    
-    ; Try to extract price - measure this specific OCR call
-    ocrStartTime := A_TickCount
-    price := get_price(x1, y1, x2, y2)
-    ocrDuration := A_TickCount - ocrStartTime
-    
-    if (price && price != "") {
-        FileAppend("SUCCESS: Price detected '" . price . "' - OCR took " . ocrDuration . "ms on this iteration - filling in field`n", "command_debug.txt")
-        
-        ; Fill in the price field
-        try {
-            CurrentPriceEdit.Text := Format("{:.2f}", price)
-        } catch {
-            CurrentPriceEdit.Text := price
-        }
-        
-        ; Stop detection since we found a price
-        StopPriceDetection()
-    }
 }
 
 ; Subscribe pattern detection functions
