@@ -23,5 +23,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         
         return true; // Keep the message channel open for async response
+    } else if (request.action === 'syncCart') {
+        console.log('📤 Background script sending cart IDs to server...', request.data);
+        
+        fetch('http://127.0.0.1:54567/sync_cart', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(request.data)
+        })
+        .then(response => response.json())
+        .then(result => {
+            console.log('✅ Cart data sent to server:', result);
+            sendResponse({status: 'success', data: result});
+        })
+        .catch(error => {
+            console.error('❌ Error sending cart data:', error);
+            sendResponse({status: 'error', error: error.toString()});
+        });
+        
+        return true;
     }
 });

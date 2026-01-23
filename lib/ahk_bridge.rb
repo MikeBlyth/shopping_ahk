@@ -1,13 +1,46 @@
 require 'timeout'
 require 'json'
+require 'net/http'
 
 class AhkBridge
   COMMAND_FILE = 'ahk_command.txt'
   STATUS_FILE = 'ahk_status.txt'
   RESPONSE_FILE = 'ahk_response.txt'
+  SERVER_PORT = 54567
 
   def initialize
     clear_files
+  end
+
+  def clear_cart_data
+    uri = URI("http://127.0.0.1:#{SERVER_PORT}/cart_verification")
+    Net::HTTP.start(uri.host, uri.port) do |http|
+      request = Net::HTTP::Delete.new(uri)
+      http.request(request)
+    end
+  rescue StandardError => e
+    puts "⚠️ Failed to clear cart data: #{e.message}".colorize(:yellow)
+  end
+
+  def wait_for_cart_data(timeout: 15)
+    start_time = Time.now
+    uri = URI("http://127.0.0.1:#{SERVER_PORT}/cart_verification")
+
+    while Time.now - start_time < timeout
+      begin
+        response = Net::HTTP.get_response(uri)
+        if response.is_a?(Net::HTTPSuccess)
+          data = JSON.parse(response.body)
+          if data['ids'] && !data['ids'].empty?
+            return data['ids']
+          end
+        end
+      rescue StandardError => e
+        # Ignore connection errors while polling
+      end
+      sleep 0.5
+    end
+    nil
   end
 
   def send_command(command, timeout: nil, params: nil)

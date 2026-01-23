@@ -29,6 +29,12 @@ SetTitleMatchMode 2
     EditPurchaseHotkey()
 }
 
+^+g::{
+    ; Verify Cart hotkey
+    WriteDebug("Ctrl+Shift+G pressed - verifying cart")
+    VerifyCartHotkey()
+}
+
 
 ^+s::{  ; Ctrl+Shift+S to show status
     status := FileExist(StatusFile) ? FileRead(StatusFile) : "No status file"
@@ -925,6 +931,28 @@ EditPurchaseHotkey() {
     response_obj["type"] := "edit_purchase_workflow"
     response_obj["value"] := "initiated"
     WriteResponseJSON(response_obj)
+}
+
+VerifyCartHotkey() {
+    ; 1. Navigate to Cart with verify flag
+    cartUrl := "https://www.walmart.com/cart?verify=true"
+    OpenURL(cartUrl)
+    
+    ; 2. Wait for page load and perform scroll for lazy loading
+    Sleep(3000)
+    Loop 5 {
+        Send("{PgDn}")
+        Sleep(200)
+    }
+    Send("^{Home}") ; Go back to top
+    
+    ; 3. Tell Ruby to verify
+    response_obj := Map()
+    response_obj["type"] := "verify_cart"
+    response_obj["value"] := "initiated"
+    WriteResponseJSON(response_obj)
+    
+    ShowPersistentStatus("Verifying cart contents...", true)
 }
 
 ShowAddItemDialogWithDefaults(suggestedName, currentUrl, prefill_price := "") {

@@ -204,3 +204,30 @@ document.addEventListener('click', function(event) {
         target = target.parentElement;
     }
 }, true); // Use capturing phase to catch it early
+
+// --- Cart Verification Logic ---
+if (window.location.search.includes('verify=true')) {
+    console.log('🛒 Verify flag detected. Waiting for DOM...');
+    
+    // Wait for dynamic content to load
+    setTimeout(() => {
+        const itemElements = document.querySelectorAll('div[data-us-item-id]');
+        const ids = Array.from(itemElements).map(el => el.getAttribute('data-us-item-id'));
+        
+        console.log(`🛒 Found ${ids.length} items in cart:`, ids);
+        
+        if (ids.length > 0) {
+            chrome.runtime.sendMessage({
+                action: 'syncCart',
+                data: { ids: ids }
+            }, (response) => {
+                console.log('✅ Cart sync response:', response);
+            });
+        }
+        
+        // Clean up URL so it doesn't trigger again on refresh
+        const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+        window.history.replaceState({path: newUrl}, '', newUrl);
+        
+    }, 2500); // 2.5s delay for DOM load
+}

@@ -1390,10 +1390,55 @@ class WalmartGroceryAssistant
       when 'edit_purchase_workflow'
         @logger.info("Processing 'edit_purchase_workflow' request...")
         handle_edit_purchase_workflow(parsed_response)
+      when 'verify_cart'
+        @logger.info("Processing 'verify_cart' request...")
+        handle_verify_cart
       else
         @logger.warn("Unrecognized response type '#{parsed_response[:type]}', attempting to process with legacy handler.")
         handle_add_new_item(response)
       end
+    end
+  end
+
+  def handle_verify_cart
+    puts "🛒 Verifying cart contents..."
+    
+    # 1. Clear old cart data on server
+    @ahk.clear_cart_data
+    
+    # 2. Wait for new data (Extension takes ~2.5s + scroll time)
+    puts "⏳ Waiting for extension to scrape cart..."
+    cart_ids = @ahk.wait_for_cart_data(timeout: 15)
+    
+    if cart_ids.nil? || cart_ids.empty?
+      @ahk.show_message("Timed out waiting for cart data or cart is empty.")
+      return
+    end
+    
+    puts "📦 Extension found #{cart_ids.length} items in cart."
+    
+    # 3. Get recent purchases (e.g. last 12 hours)
+    recent_purchases = @db.get_recent_purchases(days: 0.5) # 0.5 days = 12 hours
+    
+    missing_items = []
+    
+    recent_purchases.each do |purchase|
+      # Check if purchase.prod_id is in cart_ids
+      unless cart_ids.include?(purchase[:prod_id].to_s)
+        missing_items << purchase
+      end
+    end
+    
+    if missing_items.empty?
+      @ahk.show_message("✅ Success! All #{recent_purchases.length} recent purchases are in the cart.")
+    else
+      # Format missing items message
+      msg = "⚠️ Warning: #{missing_items.length} items purchased today are NOT in the cart:\n\n"
+      missing_items.each do |item|
+        msg += "• #{item[:description]} (#{item[:prod_id]})\n"
+      end
+      msg += "\nPlease check if they were added successfully."
+      @ahk.show_message(msg)
     end
   end
 

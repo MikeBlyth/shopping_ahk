@@ -14,6 +14,7 @@ trap("INT") {
 # Global storage
 $current_students = []
 $current_walmart_product = nil
+$current_cart_items = nil
 
 # CORS Headers to allow browser extension communication
 before do
@@ -29,6 +30,42 @@ end
 
 options '/walmart_product' do
   200
+end
+
+options '/sync_cart' do
+  200
+end
+
+# POST /sync_cart - Receive cart item IDs from Chrome Extension
+post '/sync_cart' do
+  begin
+    payload = JSON.parse(request.body.read)
+    if payload['ids']
+      $current_cart_items = payload['ids']
+      puts "[#{Time.now.strftime('%H:%M:%S')}] Received #{$current_cart_items.length} cart items"
+      content_type :json
+      { status: 'success', count: $current_cart_items.length }.to_json
+    else
+      status 400
+      { status: 'error', message: 'Missing "ids" key' }.to_json
+    end
+  rescue JSON::ParserError
+    status 400
+    { status: 'error', message: 'Invalid JSON' }.to_json
+  end
+end
+
+# GET /cart_verification - Allow Ruby bot to retrieve captured cart items
+get '/cart_verification' do
+  content_type :json
+  { ids: $current_cart_items }.to_json
+end
+
+# DELETE /cart_verification - Clear cart state
+delete '/cart_verification' do
+  $current_cart_items = nil
+  content_type :json
+  { status: 'cleared' }.to_json
 end
 
 # POST /walmart_product - Receive data from Chrome Extension
