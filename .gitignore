@@ -9,7 +9,7 @@ ahk_response.txt
 ahk_debug.txt
 command_debug.txt
 read_me.txt
-
+battery-report.html
 
 # Test files
 test_*
