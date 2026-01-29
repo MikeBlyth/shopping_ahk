@@ -181,7 +181,9 @@ class WalmartDatabase
   def get_recent_purchases(days: 30)
     cutoff_date = Date.today - days
     @purchases
+      .join(:items, prod_id: :prod_id)
       .where { purchase_date >= cutoff_date }
+      .select(Sequel[:purchases].*, Sequel[:items][:description])
       .order(Sequel.desc(:purchase_timestamp))
       .all
   end

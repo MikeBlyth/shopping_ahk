@@ -207,27 +207,66 @@ document.addEventListener('click', function(event) {
 
 // --- Cart Verification Logic ---
 if (window.location.search.includes('verify=true')) {
-    console.log('🛒 Verify flag detected. Waiting for DOM...');
+    console.log('🛒 Verify flag detected. Starting scrape loop...');
     
-    // Wait for dynamic content to load
-    setTimeout(() => {
-        const itemElements = document.querySelectorAll('div[data-us-item-id]');
-        const ids = Array.from(itemElements).map(el => el.getAttribute('data-us-item-id'));
+    let attempts = 0;
+    const maxAttempts = 10; // Try for 10 seconds (1s interval)
+    
+    const scrapeInterval = setInterval(() => {
+        attempts++;
+        console.log(`🛒 Scrape attempt ${attempts}/${maxAttempts}...`);
+
+        // Strategy 1: Data Attributes
+        // Select all potential items, then filter out those in "Saved for Later"
+        // Corrected selector: support both data-usitemid and data-us-item-id
+        let allItemElements = document.querySelectorAll('div[data-usitemid], div[data-us-item-id]');
+        let ids = [];
         
-        console.log(`🛒 Found ${ids.length} items in cart:`, ids);
-        
-        if (ids.length > 0) {
-            chrome.runtime.sendMessage({
-                action: 'syncCart',
-                data: { ids: ids }
-            }, (response) => {
-                console.log('✅ Cart sync response:', response);
+        allItemElements.forEach(el => {
+            // Check if this element is inside the "Save for Later" section
+            if (!el.closest('div[data-dca-name="saveForLater"]')) {
+                const id = el.getAttribute('data-usitemid') || el.getAttribute('data-us-item-id');
+                if (id) ids.push(id);
+            }
+        });
+
+        // Strategy 2: Fallback to link scraping
+        if (ids.length === 0) {
+            const productLinks = document.querySelectorAll('a[href*="/ip/"]');
+            const linkIds = new Set();
+            productLinks.forEach(link => {
+                // Ignore links in "Save for Later"
+                if (!link.closest('div[data-dca-name="saveForLater"]')) {
+                    const match = link.href.match(/\/(\d+)(\?|$)/);
+                    if (match && match[1]) linkIds.add(match[1]);
+                }
             });
+            ids = Array.from(linkIds);
         }
         
-        // Clean up URL so it doesn't trigger again on refresh
-        const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
-        window.history.replaceState({path: newUrl}, '', newUrl);
-        
-    }, 2500); // 2.5s delay for DOM load
+        // If we found items OR we ran out of attempts, finish up
+        if (ids.length > 0 || attempts >= maxAttempts) {
+            clearInterval(scrapeInterval);
+            
+            console.log(`🛒 Finished scraping. Found ${ids.length} items:`, ids);
+            
+            if (ids.length > 0) {
+                chrome.runtime.sendMessage({
+                    action: 'syncCart',
+                    data: { ids: ids }
+                }, (response) => console.log('✅ Cart sync response:', response));
+            } else {
+                console.warn('❌ Failed to find items after multiple attempts.');
+                // Send empty list so the server knows we tried (and clears old state)
+                chrome.runtime.sendMessage({
+                    action: 'syncCart',
+                    data: { ids: [] }
+                });
+            }
+            
+            // Clean up URL
+            const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+            window.history.replaceState({path: newUrl}, '', newUrl);
+        }
+    }, 1000); // Check every 1 second
 }

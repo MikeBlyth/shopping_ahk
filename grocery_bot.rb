@@ -1416,9 +1416,11 @@ class WalmartGroceryAssistant
     end
     
     puts "📦 Extension found #{cart_ids.length} items in cart."
+    @logger.debug("Cart IDs from extension: #{cart_ids.inspect}")
     
     # 3. Get recent purchases (e.g. last 12 hours)
     recent_purchases = @db.get_recent_purchases(days: 0.5) # 0.5 days = 12 hours
+    @logger.debug("Recent purchases in DB: #{recent_purchases.map { |p| "#{p[:description]} (#{p[:prod_id]})" }.inspect}")
     
     missing_items = []
     
@@ -1433,10 +1435,14 @@ class WalmartGroceryAssistant
       @ahk.show_message("✅ Success! All #{recent_purchases.length} recent purchases are in the cart.")
     else
       # Format missing items message
-      msg = "⚠️ Warning: #{missing_items.length} items purchased today are NOT in the cart:\n\n"
+      count = missing_items.length
+      msg = "⚠️ Warning: #{count} item#{count > 1 ? 's' : ''} purchased recently #{count > 1 ? 'are' : 'is'} NOT in the cart:\n\n"
+      
       missing_items.each do |item|
-        msg += "• #{item[:description]} (#{item[:prod_id]})\n"
+        name = item[:description] || "Unknown Item"
+        msg += "• #{name} (ID: #{item[:prod_id]})\n"
       end
+      
       msg += "\nPlease check if they were added successfully."
       @ahk.show_message(msg)
     end
